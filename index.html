@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Calculadora de Diagramas de Guitarra</title>
+    <!-- IMPORTACIÓN DEL ARCHIVO CSS -->
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+
+  <body>
+    <header>
+      <h1>Calculadora de Diapasón de Guitarra</h1>
+      <p class="subtitle">
+        Herramienta teórica y visual para mástil de 24 trastes
+      </p>
+    </header>
+
+    <nav class="pestanas">
+      <button class="pestana activa" onclick="cambiarPestana('triadas')">
+        1. Tríadas
+      </button>
+      <button class="pestana" onclick="cambiarPestana('arp')">
+        2. Arpegios
+      </button>
+      <button class="pestana" onclick="cambiarPestana('esc')">
+        3. Escalas & Modos
+      </button>
+      <button class="pestana" onclick="cambiarPestana('ds')">
+        4. Double Stops
+      </button>
+      <button class="pestana" onclick="cambiarPestana('caged')">
+        5. Sistema CAGED
+      </button>
+    </nav>
+
+    <div class="contenedor-principal">
+      <!-- MÓDULO 1: TRÍADAS -->
+      <section id="modulo-triadas" class="modulo activa">
+        <div class="panel-control">
+          <div class="grupo-control">
+            <label>Nota Fundamental:</label>
+            <select id="selector-nota-triadas"></select>
+          </div>
+          <div class="grupo-control">
+            <label>Juego de Cuerdas:</label>
+            <select id="selector-cuerdas-triadas">
+              <option value="1">Cuerdas 1-2-3 (e-B-G)</option>
+              <option value="2">Cuerdas 2-3-4 (B-G-D)</option>
+              <option value="3">Cuerdas 3-4-5 (G-D-A)</option>
+              <option value="4">Cuerdas 4-5-6 (D-A-E)</option>
+            </select>
+          </div>
+          <div class="grupo-control">
+            <label>Rango de Trastes:</label>
+            <div class="rango-inputs">
+              <input
+                type="number"
+                id="rango-inicio-triadas"
+                value="0"
+                min="0"
+                max="21"
+              />
+              <span>a</span>
+              <input
+                type="number"
+                id="rango-fin-triadas"
+                value="24"
+                min="3"
+                max="24"
+              />
+            </div>
+          </div>
+        </div>
+        <div class="pantalla-diapason">
+          <div id="marc-triadas" class="marcadores"></div>
+          <div id="grid-triadas" class="diapason"></div>
+        </div>
+      </section>
+
+      <!-- MÓDULO 2: ARPEGIOS -->
+      <section id="modulo-arp" class="modulo">
+        <div class="panel-control">
+          <div class="grupo-control">
+            <label>Nota Raíz:</label>
+            <select id="selector-nota-arp"></select>
+          </div>
+          <div class="grupo-control">
+            <label>Tipo de Acorde / Arpegio:</label>
+            <select id="selector-tipo-arp">
+              <option value="maj">Mayor (1-3-5)</option>
+              <option value="min">Menor (1-b3-5)</option>
+              <option value="maj7">Mayor 7 (1-3-5-7)</option>
+              <option value="min7">Menor 7 (1-b3-5-b7)</option>
+              <option value="dom7">Dominante 7 (1-3-5-b7)</option>
+              <option value="m7b5">Semidisminuido (1-b3-b5-b7)</option>
+              <option value="dim7">Disminuido 7 (1-b3-b5-bb7)</option>
+            </select>
+          </div>
+          <div class="grupo-control">
+            <label>Modo de Visualización:</label>
+            <select id="selector-modo-arp">
+              <option value="arpegio">Arpegio Completo en Mástil</option>
+              <option value="drop2-14">Voicing Drop 2 (Cuerdas 1-4)</option>
+              <option value="drop2-25">Voicing Drop 2 (Cuerdas 2-5)</option>
+            </select>
+          </div>
+          <div class="grupo-control">
+            <label>Rango de Trastes:</label>
+            <div class="rango-inputs">
+              <input
+                type="number"
+                id="rango-inicio-arp"
+                value="0"
+                min="0"
+                max="21"
+              />
+              <span>a</span>
+              <input
+                type="number"
+                id="rango-fin-arp"
+                value="24"
+                min="3"
+                max="24"
+              />
+            </div>
+          </div>
+        </div>
+        <div class="pantalla-diapason">
+          <div id="marc-arp" class="marcadores"></div>
+          <div id="grid-arp" class="diapason"></div>
+        </div>
+      </section>
+
+      <!-- MÓDULO 3: ESCALAS Y MODOS -->
+      <section id="modulo-esc" class="modulo">
+        <div class="panel-control">
+          <div class="grupo-control">
+            <label>Tónica:</label>
+            <select id="selector-nota-esc"></select>
+          </div>
+          <div class="grupo-control">
+            <label>Tipo de Escala / Modo:</label>
+            <select id="selector-tipo-esc">
+              <optgroup label="Escalas Base">
+                <option value="mayor">Escala Mayor (Jónico)</option>
+                <option value="menor">Escala Menor Natural (Eólico)</option>
+                <option value="armonica">Menor Armónica</option>
+                <option value="melodica">Menor Melódica</option>
+              </optgroup>
+              <optgroup label="Pentatónicas & Blues">
+                <option value="pent-menor">Pentatónica Menor</option>
+                <option value="pent-mayor">Pentatónica Mayor</option>
+                <option value="blues-menor">Blues Menor</option>
+                <option value="blues-mayor">Blues Mayor</option>
+              </optgroup>
+              <optgroup label="Modos Griegos">
+                <option value="dorico">Dórico</option>
+                <option value="frigio">Frigio</option>
+                <option value="lidio">Lidio</option>
+                <option value="mixolidio">Mixolidio</option>
+                <option value="locrio">Locrio</option>
+              </optgroup>
+            </select>
+          </div>
+          <div class="grupo-control">
+            <label>Sistema / Posición:</label>
+            <select id="selector-sistema-esc"></select>
+          </div>
+          <div class="grupo-control">
+            <label>Mostrar en Notas:</label>
+            <select id="selector-visualizacion-esc">
+              <option value="notas">Nombres de Notas (C, D, E...)</option>
+              <option value="intervalos">Intervalos (1, b3, 5...)</option>
+              <option value="ambos">Ambos (Nota + Intervalo)</option>
+            </select>
+          </div>
+          <div class="grupo-control">
+            <label>Rango de Trastes:</label>
+            <div class="rango-inputs">
+              <input
+                type="number"
+                id="rango-inicio-esc"
+                value="0"
+                min="0"
+                max="21"
+              />
+              <span>a</span>
+              <input
+                type="number"
+                id="rango-fin-esc"
+                value="24"
+                min="3"
+                max="24"
+              />
+            </div>
+          </div>
+        </div>
+
+        <div class="panel-teoria">
+          <div>
+            <strong>Construcción:</strong> <span id="ui-construccion">-</span>
+          </div>
+          <div>
+            <strong>Armonización:</strong> <span id="ui-armonizacion">-</span>
+          </div>
+        </div>
+
+        <div class="pantalla-diapason">
+          <div id="marc-esc" class="marcadores"></div>
+          <div id="grid-esc" class="diapason"></div>
+        </div>
+      </section>
+
+      <!-- MÓDULO 4: DOUBLE STOPS -->
+      <section id="modulo-ds" class="modulo">
+        <div class="panel-control">
+          <div class="grupo-control">
+            <label>Nota Base:</label>
+            <select id="selector-nota-ds"></select>
+          </div>
+          <div class="grupo-control">
+            <label>Intervalo:</label>
+            <select id="selector-intervalo-ds">
+              <option value="3">3ras Menores (3 semitonos)</option>
+              <option value="4">3ras Mayores (4 semitonos)</option>
+              <option value="5">4tas Justas (5 semitonos)</option>
+              <option value="7">5tas Justas (7 semitonos)</option>
+              <option value="8">6tas Menores (8 semitonos)</option>
+              <option value="9">6tas Mayores (9 semitonos)</option>
+            </select>
+          </div>
+          <div class="grupo-control">
+            <label>Rango de Trastes:</label>
+            <div class="rango-inputs">
+              <input
+                type="number"
+                id="rango-inicio-ds"
+                value="0"
+                min="0"
+                max="21"
+              />
+              <span>a</span>
+              <input
+                type="number"
+                id="rango-fin-ds"
+                value="24"
+                min="3"
+                max="24"
+              />
+            </div>
+          </div>
+        </div>
+        <div class="pantalla-diapason">
+          <div id="marc-ds" class="marcadores"></div>
+          <div id="grid-ds" class="diapason"></div>
+        </div>
+      </section>
+
+      <!-- MÓDULO 5: CAGED -->
+      <section id="modulo-caged" class="modulo">
+        <div class="panel-control">
+          <div class="grupo-control">
+            <label>Tónica (Raíz):</label>
+            <select id="selector-nota-caged"></select>
+          </div>
+          <div class="grupo-control">
+            <label>Forma (Molde CAGED):</label>
+            <select id="selector-forma-caged">
+              <option value="C">Forma de C</option>
+              <option value="A">Forma de A</option>
+              <option value="G">Forma de G</option>
+              <option value="E">Forma de E</option>
+              <option value="D">Forma de D</option>
+              <option value="ALL">Todas las Formas Conectadas</option>
+            </select>
+          </div>
+          <div class="grupo-control">
+            <label>Calidad del Acorde:</label>
+            <select id="selector-calidad-caged">
+              <optgroup label="Tríadas Básicas">
+                <option value="maj">Mayor (1-3-5)</option>
+                <option value="min">Menor (1-b3-5)</option>
+                <option value="dim">Disminuida (1-b3-b5)</option>
+                <option value="aug">Aumentada (1-3-#5)</option>
+              </optgroup>
+              <optgroup label="Acordes de Séptima">
+                <option value="dom7">Dominante 7 (1-3-5-b7)</option>
+                <option value="maj7">Mayor 7 (1-3-5-7)</option>
+                <option value="min7">Menor 7 (1-b3-5-b7)</option>
+                <option value="m-maj7">Menor con 7ª Mayor (1-b3-5-7)</option>
+                <option value="m7b5">Semidisminuido / m7b5 (1-b3-b5-b7)</option>
+                <option value="dim7">Disminuido 7 (1-b3-b5-bb7)</option>
+                <option value="maj7sharp5">
+                  Aumentada con 7ª Mayor (1-3-#5-7)
+                </option>
+              </optgroup>
+            </select>
+          </div>
+          <div class="grupo-control">
+            <label>Superposición Escalar (Capas):</label>
+            <select id="selector-capa-caged">
+              <option value="acorde">
+                Capa 1: Solo Notas del Acorde (Esqueleto)
+              </option>
+              <option value="pent">Capa 2: Acorde + Escala Pentatónica</option>
+              <option value="escala">
+                Capa 3: Acorde + Escala Diatónica Completa
+              </option>
+            </select>
+          </div>
+          <div class="grupo-control">
+            <label>Mostrar en Notas:</label>
+            <select id="selector-visualizacion-caged">
+              <option value="notas">Nombres de Notas (C, D, E...)</option>
+              <option value="intervalos">Intervalos (1, b3, 5...)</option>
+              <option value="ambos">Ambos (Nota + Intervalo)</option>
+            </select>
+          </div>
+          <div class="grupo-control">
+            <label>Rango de Trastes:</label>
+            <div class="rango-inputs">
+              <input
+                type="number"
+                id="rango-inicio-caged"
+                value="0"
+                min="0"
+                max="21"
+              />
+              <span>a</span>
+              <input
+                type="number"
+                id="rango-fin-caged"
+                value="24"
+                min="3"
+                max="24"
+              />
+            </div>
+          </div>
+        </div>
+
+        <div class="panel-teoria" style="display: block">
+          <strong style="color: var(--color-acento); font-size: 1rem"
+            >Guía de Integración CAGED & Escalas:</strong
+          >
+          <ul
+            style="
+              margin-top: 10px;
+              margin-left: 20px;
+              color: var(--texto-secundario);
+              font-size: 0.85rem;
+              line-height: 1.6;
+            "
+          >
+            <li>
+              <strong>Anclaje Visual:</strong> Al activar las capas pentatónicas
+              o diatónicas dentro del sistema CAGED, las notas del acorde
+              seleccionado se marcan con mayor énfasis (Rojo para la Tónica,
+              Morado para las demás notas del acorde) para servir como guías o
+              "anclas" visuales dentro de la caja de la escala.
+            </li>
+          </ul>
+        </div>
+
+        <div class="pantalla-diapason">
+          <div id="marc-caged" class="marcadores"></div>
+          <div id="grid-caged" class="diapason"></div>
+        </div>
+      </section>
+    </div>
+
+    <!-- IMPORTACIÓN DEL ARCHIVO JAVASCRIPT -->
+    <script src="app.js"></script>
+  </body>
+</html>
