@@ -1,7 +1,9 @@
 # Diapasón
 
 Calculadora visual de teoría musical para guitarra. Genera mapas de tríadas,
-arpegios, escalas, modos y double stops sobre un mástil de 24 trastes.
+arpegios, escalas, modos y double stops sobre un mástil de 24 trastes. Incluye
+un constructor de acordes, un glosario de construcción y un buscador por
+nombre, símbolo, familia, fórmula e intervalos.
 
 ## Desarrollo
 
@@ -27,9 +29,9 @@ npm test
 
 ## Arquitectura
 
-- `src/data.ts`: catálogos inmutables de notas, afinación, escalas y arpegios.
+- `src/data.ts`: catálogos inmutables de notas, afinación, escalas, arpegios y acordes.
 - `src/domain.ts`: cálculos puros y validación del rango de trastes.
-- `src/ui.ts`: composición de la interfaz y listeners de eventos.
+- `src/ui.ts`: composición de la interfaz, glosario, buscador y listeners de eventos.
 - `src/styles.css`: presentación aislada del comportamiento.
 - `src/main.ts`: único punto de entrada.
 - `tests/domain.test.ts`: pruebas de rangos, notas, double stops y CAGED.
