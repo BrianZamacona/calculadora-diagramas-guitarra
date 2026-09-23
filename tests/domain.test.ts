@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildChord, clampRange, findChordPositions, findCagedMarks, findDoubleStops, findMarks, findScaleMarks, suggestNoteSets } from "../src/domain";
+import { buildChord, clampRange, findCagedMarks, findChordVoicings, findDoubleStops, findMarks, findScaleMarks, findVoicingsForIntervals, noteAt, suggestNoteSets } from "../src/domain";
 
 describe("domain musical", () => {
   it("normaliza rangos fuera de los límites del mástil", () => {
@@ -36,10 +36,12 @@ describe("domain musical", () => {
     expect(buildChord({ root: "C", base: "major", fifth: "#5", seventh: "none", extensions: [], additions: [] }).name).toBe("C#5");
   });
 
-  it("genera variantes de un acorde hasta el traste 12", () => {
-    const positions = findChordPositions("C", [0, 4, 7], 12);
-    expect(positions.length).toBeGreaterThan(0);
-    expect(positions.every((position) => position.end <= 12 && position.marks.length > 0)).toBe(true);
+  it("genera varias digitaciones de un acorde en distintas posiciones del mástil", () => {
+    const voicings = findChordVoicings({ root: "C", base: "major", bass: undefined, fifth: "5", seventh: "none", extensions: [], additions: [] });
+    expect(voicings.length).toBeGreaterThanOrEqual(5);
+    const baseFrets = voicings.map((voicing) => voicing.baseFret);
+    expect(new Set(baseFrets).size).toBe(baseFrets.length);
+    expect(baseFrets).toEqual([...baseFrets].sort((left, right) => left - right));
   });
 
   it("no duplica la novena al combinarla con una quinta alterada", () => {
@@ -63,5 +65,65 @@ describe("domain musical", () => {
     expect(marks.length).toBeGreaterThan(0);
     expect(marks.every((mark) => (mark.fret >= 8 && mark.fret <= 12) || (mark.fret >= 20 && mark.fret <= 24))).toBe(true);
     expect(marks.some((mark) => mark.fret >= 20)).toBe(true);
+  });
+
+  it("nunca suena una nota ajena al acorde ni un bajo distinto de la raíz", () => {
+    const voicings = findChordVoicings({ root: "C", base: "major", bass: undefined, fifth: "5", seventh: "none", extensions: [], additions: [] });
+    const allowed = new Set(["C", "E", "G"]);
+    voicings.forEach((voicing) => {
+      let bassString = -1;
+      for (let index = 5; index >= 0; index -= 1) { if (voicing.fretPositions[index] !== -1) { bassString = index; break; } }
+      expect(bassString).toBeGreaterThanOrEqual(0);
+      expect(noteAt(bassString, voicing.fretPositions[bassString] as number)).toBe("C");
+      voicing.fretPositions.forEach((fret, stringIndex) => { if (fret !== -1) expect(allowed.has(noteAt(stringIndex, fret))).toBe(true); });
+    });
+  });
+
+  it("respeta el ancho de 4 trastes y el máximo de 4 dedos (sin contar cejilla) en cada digitación", () => {
+    const voicings = findChordVoicings({ root: "G", base: "major", bass: undefined, fifth: "5", seventh: "7M", extensions: ["9"], additions: [] });
+    expect(voicings.length).toBeGreaterThan(0);
+    voicings.forEach((voicing) => {
+      const fretted = voicing.fretPositions.filter((fret): fret is number => fret > 0);
+      if (fretted.length > 0) expect(Math.max(...fretted) - Math.min(...fretted)).toBeLessThanOrEqual(3);
+      expect(new Set(fretted).size).toBeLessThanOrEqual(4);
+    });
+  });
+
+  it("ya no devuelve cero digitaciones para acordes con séptima, sexta o tensiones", () => {
+    expect(findChordVoicings({ root: "C", base: "major", bass: undefined, fifth: "5", seventh: "7M", extensions: [], additions: [] }).length).toBeGreaterThan(0);
+    expect(findChordVoicings({ root: "A", base: "minor", bass: undefined, fifth: "5", seventh: "7", extensions: [], additions: [] }).length).toBeGreaterThan(0);
+    expect(findChordVoicings({ root: "C", base: "major", bass: undefined, fifth: "5", seventh: "6", extensions: [], additions: [] }).length).toBeGreaterThan(0);
+    expect(findChordVoicings({ root: "C", base: "major", bass: undefined, fifth: "5", seventh: "none", extensions: [], additions: ["add9"] }).length).toBeGreaterThan(0);
+    expect(findChordVoicings({ root: "G", base: "major", bass: undefined, fifth: "5", seventh: "7", extensions: ["9"], additions: [] }).length).toBeGreaterThan(0);
+    expect(findChordVoicings({ root: "C", base: "sus4", bass: undefined, fifth: "5", seventh: "none", extensions: [], additions: [] }).length).toBeGreaterThan(0);
+  });
+
+  it("marca cejilla al mover una forma movible por el mástil (F mayor, forma E)", () => {
+    const voicings = findChordVoicings({ root: "F", base: "major", bass: undefined, fifth: "5", seventh: "none", extensions: [], additions: [] });
+    const barreVoicing = voicings.find((voicing) => voicing.baseFret === 1);
+    expect(barreVoicing?.position).toBe("cejilla");
+    expect(barreVoicing?.barre?.fret).toBe(1);
+    expect(barreVoicing?.barre?.fromString).toBe(0);
+    expect(barreVoicing?.barre?.toString).toBe(5);
+  });
+
+  it("no omite ninguna nota de un acorde de dos notas (quinta de poder)", () => {
+    const voicings = findVoicingsForIntervals("E", [0, 7]);
+    expect(voicings.length).toBeGreaterThan(0);
+    voicings.forEach((voicing) => {
+      const notes = voicing.fretPositions.reduce<string[]>((acc, fret, stringIndex) => { if (fret !== -1) acc.push(noteAt(stringIndex, fret)); return acc; }, []);
+      expect(notes).toContain("E");
+      expect(notes).toContain("B");
+    });
+  });
+
+  it("respeta el bajo explícito de un acorde slash (C/E)", () => {
+    const voicings = findVoicingsForIntervals("C", [0, 4, 7], "E");
+    expect(voicings.length).toBeGreaterThan(0);
+    voicings.forEach((voicing) => {
+      let bassString = -1;
+      for (let index = 5; index >= 0; index -= 1) { if (voicing.fretPositions[index] !== -1) { bassString = index; break; } }
+      expect(noteAt(bassString, voicing.fretPositions[bassString] as number)).toBe("E");
+    });
   });
 });

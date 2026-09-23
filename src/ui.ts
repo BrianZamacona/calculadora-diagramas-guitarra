@@ -1,11 +1,11 @@
-import { ARPEGGIOS, CHORD_CATEGORIES, CHORD_GLOSSARY, CAGED_QUALITIES, CAGED_SHAPES, FRET_COUNT, NOTES, SCALES, STRINGS, type ArpeggioId, type CagedLayer, type CagedQuality, type CagedShape, type ModuleId, type ScaleId } from "./data";
-import { buildChord, clampRange, findChordVoicings, findCagedBoxes, findCagedLayerMarks, findDoubleStops, findMarks, findScaleMarks, findVoicingMarks, noteAt, suggestNoteSets, type ChordBase, type ChordBuilderState, type ChordVoicing, type CagedWindow, type FretMark, type Range, type ScaleSystem } from "./domain";
+import { ARPEGGIOS, CHORD_CATEGORIES, CHORD_GLOSSARY, CAGED_QUALITIES, CAGED_SHAPES, FRET_COUNT, NOTES, SCALES, STRINGS, type ArpeggioId, type CagedLayer, type CagedQuality, type CagedShape, type ChordGlossaryEntry, type ModuleId, type ScaleId } from "./data";
+import { buildChord, clampRange, findChordVoicings, findCagedBoxes, findCagedLayerMarks, findDoubleStops, findMarks, findScaleMarks, findVoicingMarks, findVoicingsForIntervals, noteAt, suggestNoteSets, type ChordBase, type ChordBuilderState, type ChordVoicing, type CagedWindow, type FretMark, type Range, type ScaleSystem } from "./domain";
 
 type DisplayMode = "notes" | "intervals" | "both";
-interface State { module: ModuleId; root: string; scale: ScaleId; scaleSystem: ScaleSystem; arpeggio: ArpeggioId; arpeggioMode: "full" | "drop2-14" | "drop2-25"; stringSet: number; cagedShape: CagedShape; cagedQuality: CagedQuality; cagedLayer: CagedLayer; display: DisplayMode; start: number; end: number; doubleStop: number; chordCategory: string; searchQuery: string; searchCategory: string; searchNotes: string[]; chordBuilder: ChordBuilderState; }
+interface State { module: ModuleId; root: string; scale: ScaleId; scaleSystem: ScaleSystem; arpeggio: ArpeggioId; arpeggioMode: "full" | "drop2-14" | "drop2-25"; stringSet: number; cagedShape: CagedShape; cagedQuality: CagedQuality; cagedLayer: CagedLayer; display: DisplayMode; start: number; end: number; doubleStop: number; chordCategory: string; searchQuery: string; searchNotes: string[]; chordBuilder: ChordBuilderState; }
 
 const MODULES: Array<{ id: ModuleId; label: string }> = [
-  { id: "acordes", label: "Acordes" }, { id: "glosario", label: "Glosario" }, { id: "buscador", label: "Buscador" }, { id: "triadas", label: "Tríadas" }, { id: "arp", label: "Arpegios" }, { id: "esc", label: "Escalas" }, { id: "ds", label: "Double stops" }, { id: "caged", label: "CAGED" },
+  { id: "inicio", label: "Inicio" }, { id: "acordes", label: "Acordes" }, { id: "glosario", label: "Glosario" }, { id: "buscador", label: "Buscador" }, { id: "triadas", label: "Tríadas" }, { id: "arp", label: "Arpegios" }, { id: "esc", label: "Escalas" }, { id: "ds", label: "Double stops" }, { id: "caged", label: "CAGED" },
 ];
 
 // agrupación original: Escalas Base, Pentatónicas & Blues, Modos Griegos
@@ -48,7 +48,87 @@ function rangeControls(state: State): HTMLElement {
   const wrapper = el("div", "range"); const start = el("input"); start.type = "number"; start.min = "0"; start.max = String(FRET_COUNT - 3); start.value = String(state.start); start.dataset.range = "start";
   const separator = el("span"); separator.textContent = "a"; const end = el("input"); end.type = "number"; end.min = "3"; end.max = String(FRET_COUNT); end.value = String(state.end); end.dataset.range = "end"; wrapper.append(start, separator, end); return wrapper;
 }
-function glossaryCard(entry: (typeof CHORD_GLOSSARY)[number]): HTMLElement {
+const LEGEND_ITEMS: ReadonlyArray<[FretMark["kind"], string]> = [["root", "Raíz"], ["chord", "Nota del acorde"], ["scale", "Nota de la escala"], ["blue", "Blue note"]];
+function legend(): HTMLElement {
+  const wrapper = el("div", "legend"); wrapper.setAttribute("role", "note"); wrapper.setAttribute("aria-label", "Significado de los colores en el mástil");
+  LEGEND_ITEMS.forEach(([kind, label]) => { const item = el("span", "legend-item"); const swatch = el("span", `legend-swatch ${kind}`); const text = el("span"); text.textContent = label; item.append(swatch, text); wrapper.append(item); });
+  return wrapper;
+}
+function infoBlock(title: string, paragraphs: readonly string[]): HTMLElement {
+  const block = el("div", "info-block"); const heading = el("h3"); heading.textContent = title; block.append(heading);
+  paragraphs.forEach((text) => { const paragraph = el("p"); paragraph.textContent = text; block.append(paragraph); });
+  return block;
+}
+function tuningStrip(): HTMLElement {
+  const wrapper = el("div", "tuning-strip");
+  STRINGS.forEach((label, index) => { const item = el("div", "tuning-item"); const number = el("span", "tuning-number"); number.textContent = `${index + 1}ª`; const note = el("strong"); note.textContent = label; item.append(number, note); wrapper.append(item); });
+  return wrapper;
+}
+const MODULE_GUIDE: ReadonlyArray<[string, string]> = [
+  ["Acordes", "Arma cualquier cifrado (tríada, séptima, tensiones, bajo alternativo) y consulta todas sus digitaciones en el mástil."],
+  ["Glosario", "Consulta la fórmula, las notas y las digitaciones de los acordes más comunes, del nivel principiante al avanzado."],
+  ["Buscador", "Toca notas sobre el diapasón y descubre qué escalas, arpegios o acordes encajan con ellas."],
+  ["Tríadas", "Visualiza tríadas mayores en distintos juegos de 3 cuerdas para conectar posiciones por todo el mástil."],
+  ["Arpegios", "Recorre arpegios completos o en voicings Drop 2 sobre 4 cuerdas."],
+  ["Escalas", "Estudia escalas y modos por bloques, posiciones o patrones 3NPS/4NPS."],
+  ["Double stops", "Practica pares de notas (terceras, sextas...) típicos de solos e introducciones melódicas."],
+  ["CAGED", "Conecta las 5 formas C-A-G-E-D con su acorde, pentatónica o escala diatónica superpuestos."],
+];
+function moduleGuide(): HTMLElement {
+  const list = el("div", "module-guide");
+  MODULE_GUIDE.forEach(([name, text]) => { const row = el("div", "module-guide-item"); const label = el("strong"); label.textContent = name; const desc = el("span"); desc.textContent = text; row.append(label, desc); list.append(row); });
+  return list;
+}
+const LEARNING_PATH: readonly string[] = [
+  "Aprende los acordes abiertos básicos (Em, Am, C, G, D) en la pestaña Acordes y practica cambiar entre ellos despacio.",
+  "Revisa el Glosario para entender la fórmula de cada acorde: qué notas lo forman y por qué suena mayor, menor o con séptima.",
+  "Estudia la escala pentatónica menor en Escalas: con solo 5 notas es la base de incontables solos e improvisaciones.",
+  "Usa CAGED para ver cómo las mismas notas de un acorde o escala se repiten en distintas posiciones del mástil.",
+  "Cuando domines los acordes abiertos, practica las cejillas (barre) en Acordes: son la puerta para tocar en cualquier tono.",
+  "Explora arpegios, double stops y tensiones (9ª, 11ª, 13ª) cuando quieras construir líneas melódicas más ricas.",
+];
+const BASIC_TERMS: ReadonlyArray<[string, string]> = [
+  ["Traste", "Cada división metálica del mástil; pisar una cuerda detrás de un traste cambia su nota."],
+  ["Cejilla (barre)", "Técnica de presionar varias cuerdas a la vez con un mismo dedo, normalmente el índice."],
+  ["Intervalo", "Distancia en semitonos entre dos notas."],
+  ["Tríada", "Acorde de 3 notas: raíz, tercera y quinta."],
+  ["Tensión", "Nota añadida más allá de la séptima (9ª, 11ª, 13ª) que da color al acorde."],
+  ["Voicing / digitación", "Una forma concreta de tocar un acorde: qué notas, en qué cuerda y en qué traste."],
+];
+function homeView(): HTMLElement {
+  const section = el("section", "catalog-view home-view");
+  const intro = el("div", "section-intro"); const title = el("h2"); title.textContent = "Bienvenida y primeros pasos"; const copy = el("p"); copy.textContent = "Diapasón te acompaña desde tu primer acorde hasta la teoría más avanzada. Esta guía resume cómo usar la app y por dónde empezar si nunca has tocado la guitarra."; intro.append(title, copy); section.append(intro);
+  const grid = el("div", "home-grid");
+  const start = infoBlock("Antes de tocar", ["Afina la guitarra en afinación estándar. De la cuerda más gruesa (6ª) a la más fina (1ª):"]);
+  start.append(tuningStrip());
+  const startTip = el("p"); startTip.textContent = "Usa un afinador físico o una app de afinador antes de cada práctica: sin una afinación correcta ningún acorde sonará bien."; start.append(startTip);
+  const readDiagrams = infoBlock("Cómo leer los diagramas", [
+    "En los diagramas de acorde cada columna es una cuerda, de la más fina (izquierda) a la más gruesa (derecha).",
+    "\"x\" = cuerda que no se toca. \"o\" = cuerda al aire. Los números en los círculos indican el dedo: 1 índice, 2 corazón, 3 anular, 4 meñique.",
+    "En los mapas del mástil, el color indica el papel de cada nota:",
+  ]);
+  readDiagrams.append(legend());
+  const path = infoBlock("Ruta de aprendizaje sugerida", []);
+  const steps = el("ol", "learning-path");
+  LEARNING_PATH.forEach((text) => { const item = el("li"); item.textContent = text; steps.append(item); });
+  path.append(steps);
+  const practice = infoBlock("Consejos de práctica", [
+    "Practica sin prisa: es mejor un cambio de acorde lento y limpio que uno rápido y confuso.",
+    "Usa un metrónomo (o cualquier app de metrónomo) desde el principio para tocar con un pulso estable.",
+    "Presiona las cuerdas cerca del traste (no encima) y con la punta de los dedos para que no suenen apagadas.",
+    "Descansa si sientes dolor o fatiga: las manos necesitan tiempo para acostumbrarse al instrumento.",
+  ]);
+  const vocabulary = infoBlock("Vocabulario básico", []);
+  const terms = el("dl", "term-list");
+  BASIC_TERMS.forEach(([term, definition]) => { const dt = el("dt"); dt.textContent = term; const dd = el("dd"); dd.textContent = definition; terms.append(dt, dd); });
+  vocabulary.append(terms);
+  const modules = infoBlock("Qué encontrarás en cada pestaña", []);
+  modules.append(moduleGuide());
+  grid.append(start, readDiagrams, path, practice, vocabulary, modules);
+  section.append(grid);
+  return section;
+}
+function glossaryCard(entry: ChordGlossaryEntry): HTMLElement {
   const card = el("article", "chord-card");
   const heading = el("div", "chord-card-heading");
   const title = el("h3"); title.textContent = entry.name;
@@ -59,16 +139,31 @@ function glossaryCard(entry: (typeof CHORD_GLOSSARY)[number]): HTMLElement {
   const formula = el("p", "chord-formula"); formula.textContent = `Fórmula: ${entry.formula}`;
   const intervals = el("p", "chord-intervals"); intervals.textContent = `Intervalos desde la raíz: ${entry.intervals.join(" - ")} semitonos`;
   const description = el("p", "chord-description"); description.textContent = entry.description;
-  card.append(heading, tags, formula, intervals, description);
+  const disclosure = el("details", "chord-card-voicings");
+  const summary = el("summary"); summary.textContent = "Ver digitaciones en el mástil"; disclosure.append(summary);
+  const diagrams = el("div", "chord-diagrams compact"); disclosure.append(diagrams);
+  disclosure.addEventListener("toggle", () => {
+    if (!disclosure.open || diagrams.childElementCount > 0) return;
+    const voicings = findVoicingsForIntervals("C", entry.intervals, entry.bass);
+    if (voicings.length === 0) { const empty = el("p", "empty-state"); empty.textContent = "Sin digitaciones disponibles en los primeros 12 trastes."; diagrams.append(empty); return; }
+    voicings.forEach((voicing) => diagrams.append(fingeringDiagram(voicing, "C")));
+  });
+  card.append(heading, tags, formula, intervals, description, disclosure);
   return card;
 }
 function chordCatalogView(state: State, onChange: () => void): HTMLElement {
   const section = el("section", "catalog-view");
-  const intro = el("div", "section-intro"); const title = el("h2"); title.textContent = "Glosario de acordes"; const copy = el("p"); copy.textContent = "Consulta cómo se construye cada acorde y en qué contexto suele aparecer."; intro.append(title, copy);
+  const intro = el("div", "section-intro"); const title = el("h2"); title.textContent = "Glosario de acordes"; const copy = el("p"); copy.textContent = "Consulta cómo se construye cada acorde, en qué contexto suele aparecer y despliega sus digitaciones en el mástil."; intro.append(title, copy);
+  const search = el("input"); search.type = "search"; search.placeholder = "Nombre, símbolo, familia o fórmula…"; search.value = state.searchQuery; search.setAttribute("aria-label", "Buscar en el glosario de acordes"); search.addEventListener("input", () => { state.searchQuery = search.value; onChange(); });
   const category = selectControl("chord-category", CHORD_CATEGORIES, state.chordCategory); category.addEventListener("change", () => { state.chordCategory = category.value; onChange(); });
-  const filter = el("div", "catalog-filter"); filter.append(field("Filtrar por familia", category)); section.append(intro, filter);
-  const entries = state.chordCategory === "Todos" ? CHORD_GLOSSARY : CHORD_GLOSSARY.filter((entry) => entry.category === state.chordCategory);
-  const grid = el("div", "chord-grid"); entries.forEach((entry) => grid.append(glossaryCard(entry))); section.append(grid);
+  const filter = el("div", "catalog-filter"); filter.append(field("Buscar acorde", search), field("Filtrar por familia", category)); section.append(intro, filter);
+  const query = state.searchQuery.trim().toLowerCase();
+  const matchesQuery = (entry: ChordGlossaryEntry): boolean => query.length === 0 || [entry.name, entry.symbol, entry.family, entry.formula].some((value) => value.toLowerCase().includes(query));
+  const entries = (state.chordCategory === "Todos" ? CHORD_GLOSSARY : CHORD_GLOSSARY.filter((entry) => entry.category === state.chordCategory)).filter(matchesQuery);
+  const grid = el("div", "chord-grid");
+  if (entries.length === 0) { const empty = el("p", "empty-state"); empty.textContent = "Ningún acorde coincide con tu búsqueda."; grid.append(empty); }
+  else entries.forEach((entry) => grid.append(glossaryCard(entry)));
+  section.append(grid);
   return section;
 }
 function searchView(state: State, onChange: () => void): HTMLElement {
@@ -96,9 +191,20 @@ function choiceGroup(labelText: string, values: readonly [string, string][], sel
   return group;
 }
 function fingeringDiagram(fingering: ChordVoicing, root: string): HTMLElement {
-  const card = el("article", "chord-diagram-card"); const title = el("h3"); title.textContent = fingering.baseFret > 1 ? `${fingering.title} · traste ${fingering.baseFret}` : fingering.title; card.append(title);
-  const frets = fingering.fretPositions; const maxFret = Math.max(1, ...frets.filter((fret): fret is number => typeof fret === "number")); const minFret = fingering.baseFret > 1 ? fingering.baseFret : 1; const diagram = el("div", "fingering-diagram"); diagram.style.gridTemplateColumns = "repeat(6, 34px)";
+  const card = el("article", "chord-diagram-card"); const title = el("h3"); title.textContent = fingering.title; card.append(title);
+  const frets = fingering.fretPositions; const fretted = frets.filter((fret) => fret > 0); const maxFret = fretted.length > 0 ? Math.max(...fretted) : 1; const minFret = fingering.baseFret > 1 ? fingering.baseFret : 1;
+  const diagram = el("div", "fingering-diagram"); diagram.style.gridTemplateColumns = "repeat(6, 34px)";
   frets.forEach((fret) => { const marker = el("span", "fingering-open"); marker.textContent = fret === -1 ? "x" : fret === 0 ? "o" : ""; diagram.append(marker); });
+  if (fingering.barre) {
+    const rowIndex = fingering.barre.fret - minFret;
+    if (rowIndex >= 0) {
+      const bar = el("span", "fingering-barre");
+      bar.style.left = `${8 + fingering.barre.fromString * 34}px`;
+      bar.style.width = `${(fingering.barre.toString - fingering.barre.fromString + 1) * 34}px`;
+      bar.style.top = `${7 + 25 + rowIndex * 34}px`;
+      diagram.append(bar);
+    }
+  }
   for (let fret = minFret; fret <= Math.max(minFret + 3, maxFret); fret += 1) for (let stringIndex = 0; stringIndex < 6; stringIndex += 1) { const cell = el("div", "fingering-cell"); if (frets[stringIndex] === fret) { const dot = el("span", `diagram-note ${noteAt(stringIndex, fret) === root ? "root" : ""}`); dot.textContent = String(fingering.fingerPositions[stringIndex] || ""); dot.setAttribute("aria-label", `${noteAt(stringIndex, fret)}, dedo ${fingering.fingerPositions[stringIndex]}`); cell.append(dot); } diagram.append(cell); }
   card.append(diagram); return card;
 }
@@ -115,7 +221,14 @@ function chordBuilderView(state: State, onChange: () => void): HTMLElement {
   const additions = checkboxGroup("Adiciones", ["add2", "add4", "add6", "add9", "add11", "add13"], builder.additions, (values) => { builder.additions = values as ChordBuilderState["additions"]; onChange(); });
   controlsPanel.append(root, base, bass, fifth, seventh, extensions, additions); section.append(controlsPanel);
   const result = buildChord(builder); const resultPanel = el("div", "builder-result"); const resultTitle = el("p", "result-label"); resultTitle.textContent = "Cifrado resultante"; const name = el("strong", "result-name"); name.textContent = result.name || "Acorde no válido"; const notes = el("p"); notes.textContent = `Notas: ${result.notes.join(" - ") || "-"}`; const intervals = el("p"); intervals.textContent = `Intervalos absolutos: ${result.intervals.join(" - ") || "-"}`; resultPanel.append(resultTitle, name, notes, intervals); section.append(resultPanel);
-  if (result.intervals.length > 0) { const diagrams = el("div", "chord-diagrams"); findChordVoicings(builder).forEach((fingering) => diagrams.append(fingeringDiagram(fingering, builder.root))); section.append(diagrams); }
+  if (result.intervals.length > 0) {
+    const voicings = findChordVoicings(builder);
+    const diagramsHeading = el("div", "diagrams-heading");
+    const count = el("h3"); count.textContent = voicings.length > 0 ? `${voicings.length} digitación${voicings.length === 1 ? "" : "es"} en el mástil` : "Sin digitaciones disponibles en los primeros 12 trastes";
+    const caption = el("p", "diagrams-caption"); caption.textContent = "\"x\" = cuerda silenciada · \"o\" = cuerda al aire · el número indica el dedo (1 índice, 2 corazón, 3 anular, 4 meñique).";
+    diagramsHeading.append(count, caption); section.append(diagramsHeading);
+    const diagrams = el("div", "chord-diagrams"); voicings.forEach((fingering) => diagrams.append(fingeringDiagram(fingering, builder.root))); section.append(diagrams);
+  }
   return section;
 }
 function controls(state: State, onChange: () => void): HTMLElement {
@@ -176,11 +289,12 @@ function renderBoard(state: State): HTMLElement {
 }
 
 export function mountApp(root: HTMLElement): void {
-  const state: State = { module: "acordes", root: "C", scale: "mayor", scaleSystem: "all", arpeggio: "Maj", arpeggioMode: "full", stringSet: 0, cagedShape: "ALL", cagedQuality: "Maj", cagedLayer: "chord", display: "notes", start: 0, end: FRET_COUNT, doubleStop: 3, chordCategory: "Todos", searchQuery: "", searchCategory: "Todos", searchNotes: [], chordBuilder: { root: "C", base: "major", bass: undefined, fifth: "5", seventh: "none", extensions: [], additions: [] } };
-  const app = el("main"); const hero = el("header", "hero"); const eyebrow = el("div", "eyebrow"); eyebrow.textContent = "Teoría aplicada al mástil"; const title = el("h1"); title.textContent = "Diapasón"; const description = el("p"); description.textContent = "Construye mapas musicales claros para estudiar guitarra con 24 trastes."; hero.append(el("div")); hero.firstElementChild?.append(eyebrow, title, description); app.append(hero);
-  const tabs = el("nav", "tabs"); tabs.setAttribute("aria-label", "Módulos de estudio"); const content = el("section", "panel"); app.append(tabs, content); root.replaceChildren(app);
+  const state: State = { module: "inicio", root: "C", scale: "mayor", scaleSystem: "all", arpeggio: "Maj", arpeggioMode: "full", stringSet: 0, cagedShape: "ALL", cagedQuality: "Maj", cagedLayer: "chord", display: "notes", start: 0, end: FRET_COUNT, doubleStop: 3, chordCategory: "Todos", searchQuery: "", searchNotes: [], chordBuilder: { root: "C", base: "major", bass: undefined, fifth: "5", seventh: "none", extensions: [], additions: [] } };
+  const app = el("main"); const hero = el("header", "hero"); const eyebrow = el("div", "eyebrow"); eyebrow.textContent = "Teoría aplicada al mástil"; const title = el("h1"); title.textContent = "Diapasón"; const description = el("p"); description.textContent = "Aprende guitarra desde cero o profundiza tu teoría musical: acordes, escalas y arpegios sobre un mástil de 24 trastes."; hero.append(el("div")); hero.firstElementChild?.append(eyebrow, title, description); app.append(hero);
+  const tabs = el("nav", "tabs"); tabs.setAttribute("role", "tablist"); tabs.setAttribute("aria-label", "Módulos de estudio"); const content = el("section", "panel"); content.id = "content-panel"; content.setAttribute("role", "tabpanel"); content.tabIndex = -1; app.append(tabs, content); root.replaceChildren(app);
   const draw = (): void => {
     content.replaceChildren();
+    if (state.module === "inicio") { content.append(homeView()); return; }
     if (state.module === "acordes") { content.append(chordBuilderView(state, draw)); return; }
     if (state.module === "glosario") { content.append(chordCatalogView(state, draw)); return; }
     if (state.module === "buscador") { content.append(searchView(state, draw)); return; }
@@ -194,6 +308,7 @@ export function mountApp(root: HTMLElement): void {
       theory.append(construction, harmony);
       content.append(theory);
     }
+    content.append(legend());
     content.append(renderBoard(state));
     const status = el("p", "status");
     let moduleLabel = "mapa de notas";
@@ -202,7 +317,16 @@ export function mountApp(root: HTMLElement): void {
     status.textContent = `${state.root}: ${moduleLabel}.`;
     content.append(status);
   };
-  MODULES.forEach(({ id, label }) => { const tab = el("button", "tab"); tab.type = "button"; tab.textContent = label; tab.setAttribute("aria-pressed", String(id === state.module)); tab.addEventListener("click", () => { state.module = id; MODULES.forEach(({ id: itemId }) => { const button = tabs.querySelector(`[data-module="${itemId}"]`); button?.classList.toggle("active", itemId === state.module); button?.setAttribute("aria-pressed", String(itemId === state.module)); }); draw(); }); tab.dataset.module = id; tabs.append(tab); });
-  tabs.querySelector(".tab")?.classList.add("active"); draw();
+  MODULES.forEach(({ id, label }) => {
+    const tab = el("button", "tab"); tab.type = "button"; tab.textContent = label; tab.setAttribute("role", "tab"); tab.id = `tab-${id}`; tab.setAttribute("aria-controls", "content-panel"); tab.setAttribute("aria-selected", String(id === state.module));
+    tab.addEventListener("click", () => {
+      state.module = id;
+      MODULES.forEach(({ id: itemId }) => { const button = tabs.querySelector(`[data-module="${itemId}"]`); button?.classList.toggle("active", itemId === state.module); button?.setAttribute("aria-selected", String(itemId === state.module)); });
+      content.setAttribute("aria-labelledby", `tab-${id}`);
+      draw();
+    });
+    tab.dataset.module = id; tabs.append(tab);
+  });
+  tabs.querySelector(".tab")?.classList.add("active"); content.setAttribute("aria-labelledby", `tab-${state.module}`); draw();
 }
 

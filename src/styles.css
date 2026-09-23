@@ -217,6 +217,50 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 3px s
 .range-19 .board { zoom: .84; } .range-20 .board { zoom: .82; } .range-21 .board { zoom: .8; }
 .range-22 .board { zoom: .79; } .range-23 .board { zoom: .78; } .range-24 .board, .range-25 .board { zoom: .77; }
 
+.legend { display: flex; flex-wrap: wrap; gap: 14px; margin: 0 0 14px; padding: 10px 14px; background: #080f27; border: 1px solid var(--line); border-radius: 5px; }
+.legend-item { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: .78rem; }
+.legend-swatch { width: 16px; height: 16px; border-radius: 50%; box-shadow: 0 1px 3px #000a; }
+.legend-swatch.root { background: radial-gradient(circle at 35% 30%, #ffb199, var(--root)); }
+.legend-swatch.chord { background: radial-gradient(circle at 35% 30%, #ffe08a, var(--accent)); }
+.legend-swatch.scale { background: radial-gradient(circle at 35% 30%, #ffe9b0, var(--scale)); }
+.legend-swatch.blue { background: radial-gradient(circle at 35% 30%, #fff3c4, var(--blue)); }
+
+.home-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; align-items: start; }
+.info-block { display: grid; gap: 8px; align-content: start; padding: 16px; background: linear-gradient(145deg, #111d3e, #0a112b); border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 5px; }
+.info-block h3 { margin: 0; color: var(--accent-2); font-size: 1.05rem; }
+.info-block p { margin: 0; color: var(--muted); font-size: .88rem; line-height: 1.5; }
+.info-block .legend { margin: 2px 0 0; }
+
+.tuning-strip { display: flex; flex-wrap: wrap; gap: 8px; }
+.tuning-item { display: grid; place-items: center; gap: 2px; min-width: 42px; padding: 8px 6px; background: #0b1330; border: 1px solid var(--line); border-radius: 4px; }
+.tuning-number { color: var(--muted); font-size: .65rem; text-transform: uppercase; letter-spacing: .06em; }
+.tuning-item strong { color: var(--accent-2); font-size: 1rem; }
+
+.module-guide { display: grid; gap: 8px; }
+.module-guide-item { display: grid; grid-template-columns: 96px 1fr; gap: 8px; font-size: .85rem; }
+.module-guide-item strong { color: var(--accent-2); }
+.module-guide-item span { color: var(--muted); }
+
+.learning-path { margin: 0; padding-left: 20px; display: grid; gap: 8px; color: var(--muted); font-size: .88rem; line-height: 1.5; }
+.learning-path li::marker { color: var(--accent); font-weight: 700; }
+
+.term-list { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 0; }
+.term-list dt { color: var(--accent-2); font-weight: 700; font-size: .86rem; }
+.term-list dd { margin: 0 0 6px; color: var(--muted); font-size: .86rem; }
+
+.chord-card-voicings { margin-top: 4px; }
+.chord-card-voicings summary { cursor: pointer; color: var(--accent); font-size: .78rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; list-style: none; }
+.chord-card-voicings summary::-webkit-details-marker { display: none; }
+.chord-card-voicings summary::before { content: "▸ "; }
+.chord-card-voicings[open] summary::before { content: "▾ "; }
+.chord-card-voicings .chord-diagrams.compact { margin-top: 10px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+
+.diagrams-heading { margin: 4px 0 -4px; }
+.diagrams-heading h3 { margin: 0 0 4px; color: var(--accent-2); font-size: 1.15rem; }
+.diagrams-caption { margin: 0; color: var(--muted); font-size: .78rem; }
+
+.fingering-barre { position: absolute; height: 30px; border-radius: 15px; background: linear-gradient(180deg, #4a2c17ee, #2a170bee); box-shadow: inset 0 1px 2px #ffffff33, 0 2px 4px #00000088; z-index: 1; pointer-events: none; }
+
 @media (max-width: 700px) {
   .app-shell { width: min(100% - 20px, 1180px); padding-top: 25px; }
   .hero { display: block; }
@@ -224,4 +268,5 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 3px s
   .panel { padding: 12px; }
   .board-wrap { justify-content: flex-start; }
   .builder-controls .checkbox-group, .choice-group:first-child { grid-column: auto; }
+  .module-guide-item { grid-template-columns: 1fr; }
 }

@@ -24,18 +24,13 @@ export interface BuiltChord {
   intervals: number[];
   bass?: Note;
 }
-export interface ChordPosition {
-  start: number;
-  end: number;
-  rootString: number;
-  rootFret: number;
-  marks: FretMark[];
-}
 export interface ChordVoicing {
   title: string;
   fretPositions: readonly (number | -1)[];
   fingerPositions: readonly number[];
   baseFret: number;
+  position: "abierta" | "cejilla" | "movible";
+  barre?: { fret: number; fromString: number; toString: number };
 }
 export interface NoteSetSuggestion {
   kind: "escala" | "arpegio" | "acorde";
@@ -91,52 +86,149 @@ export function buildChord(state: ChordBuilderState): BuiltChord {
   return { name, notes, intervals: normalizedIntervals, bass };
 }
 
-export function findChordPositions(root: string, intervals: readonly number[], maxFret = 12): ChordPosition[] {
-  const rootIndex = noteIndex(root);
-  if (rootIndex < 0) return [];
-  const positions: ChordPosition[] = [];
-  [5, 4].forEach((rootString) => {
-    for (let rootFret = 0; rootFret <= maxFret; rootFret += 1) {
-      if ((TUNING[rootString] + rootFret - rootIndex + 12) % 12 !== 0) continue;
-      const start = Math.max(0, Math.min(maxFret - 3, rootFret - 1));
-      const end = Math.min(maxFret, start + 3);
-      const marks = findMarks(root, intervals, { start, end });
-      const duplicate = positions.some((position) => position.start === start && position.rootString === rootString);
-      if (!duplicate && marks.length > 0) positions.push({ start, end, rootString, rootFret, marks });
-    }
-  });
-  return positions;
+const MAX_VOICING_FRET = 12;
+const MAX_FRET_SPAN = 3;
+const MAX_FINGERS = 4;
+const MIN_SOUNDING_STRINGS = 3;
+const MAX_VOICING_RESULTS = 12;
+const MAX_RAW_VOICINGS = 300;
+
+interface RawVoicing {
+  frets: (number | -1)[];
+  coverage: number;
+  soundingStrings: number;
+  baseFret: number;
+  fingerCount: number;
 }
 
-export function findChordVoicings(state: ChordBuilderState): ChordVoicing[] {
-  const rootIndex = noteIndex(state.root);
-  if (rootIndex < 0 || state.extensions.length > 0 || state.additions.length > 0 || state.fifth !== "5") return [];
-  const voicings: ChordVoicing[] = [];
-  const addShape = (title: string, rootString: number, pattern: readonly (number | -1)[], fingers: readonly number[]): void => {
-    const rootFret = (rootIndex - TUNING[rootString] + 12) % 12;
-    if (rootFret > 12) return;
-    const frets = pattern.map((offset) => offset === -1 ? -1 : rootFret + offset);
-    const occupied = frets.filter((fret): fret is number => fret > 0);
-    const baseFret = occupied.length > 0 ? Math.min(...occupied) : 1;
-    voicings.push({ title, fretPositions: frets, fingerPositions: fingers, baseFret });
+// Recorre las 6 cuerdas probando silencio, cuerda al aire o traste 1-12 en cada una. Descarta
+// combinaciones con notas ajenas al acorde, con el bajo equivocado, con más de 4 dedos libres
+// (sin contar cejilla) o con un mástil de más de 4 trastes de ancho. Así se generan digitaciones
+// reales en cualquier posición, igual que hacen los generadores de acordes tipo "Chord!".
+function searchVoicings(rootIndex: number, mustHave: readonly number[], niceToHave: readonly number[], bassIndex: number): RawVoicing[] {
+  const must = new Set(mustHave.map((interval) => (rootIndex + interval + 1200) % 12));
+  const nice = new Set(niceToHave.map((interval) => (rootIndex + interval + 1200) % 12));
+  const allowed = new Set<number>([...must, ...nice]);
+  const results: RawVoicing[] = [];
+  if (must.size > 6) return results;
+  const frets: (number | -1)[] = [-1, -1, -1, -1, -1, -1];
+
+  const finalize = (soundingStrings: number, covered: Set<number>): void => {
+    if (soundingStrings < MIN_SOUNDING_STRINGS) return;
+    for (const pitch of must) if (!covered.has(pitch)) return;
+    const fretCounts = new Map<number, number>();
+    frets.forEach((fret) => { if (fret > 0) fretCounts.set(fret, (fretCounts.get(fret) ?? 0) + 1); });
+    if (fretCounts.size > MAX_FINGERS) return;
+    const fretted = frets.filter((fret) => fret > 0);
+    const baseFret = fretted.length > 0 ? Math.min(...fretted) : 0;
+    let coverage = 0;
+    covered.forEach((pitch) => { if (nice.has(pitch)) coverage += 1; });
+    results.push({ frets: [...frets], coverage, soundingStrings, baseFret, fingerCount: fretCounts.size });
   };
-  if (state.base === "major" && state.seventh === "none") {
-    if (state.root === "C") voicings.push({ title: "C abierto", fretPositions: [-1, 3, 2, 0, 1, 0], fingerPositions: [0, 3, 2, 0, 1, 0], baseFret: 1 });
-    addShape("Forma G mayor", 5, [0, -1, -3, -3, -3, 0], [4, 3, 1, 1, 1, 4]);
-    addShape("Forma E mayor", 5, [0, 2, 2, 1, 0, 0], [1, 3, 4, 2, 1, 1]);
-    addShape("Forma A mayor", 4, [-1, 0, 2, 2, 2, 0], [0, 1, 3, 4, 2, 1]);
-    addShape("Forma D mayor", 3, [-1, -1, 0, 2, 3, 2], [0, 0, 0, 1, 3, 2]);
+
+  const recurse = (stringIndex: number, bassFound: boolean, minFret: number, maxFret: number, soundingStrings: number, covered: Set<number>): void => {
+    if (results.length >= MAX_RAW_VOICINGS) return;
+    if (stringIndex < 0) { finalize(soundingStrings, covered); return; }
+    frets[stringIndex] = -1;
+    recurse(stringIndex - 1, bassFound, minFret, maxFret, soundingStrings, covered);
+    const openPitch = TUNING[stringIndex];
+    const openValid = bassFound ? allowed.has(openPitch) : openPitch === bassIndex;
+    if (openValid) {
+      frets[stringIndex] = 0;
+      const nextCovered = covered.has(openPitch) ? covered : new Set(covered).add(openPitch);
+      recurse(stringIndex - 1, true, minFret, maxFret, soundingStrings + 1, nextCovered);
+    }
+    for (let fret = 1; fret <= MAX_VOICING_FRET; fret += 1) {
+      const pitch = (TUNING[stringIndex] + fret) % 12;
+      const valid = bassFound ? allowed.has(pitch) : pitch === bassIndex;
+      if (!valid) continue;
+      const nextMin = Math.min(minFret, fret);
+      const nextMax = Math.max(maxFret, fret);
+      if (nextMax - nextMin > MAX_FRET_SPAN) continue;
+      frets[stringIndex] = fret;
+      const nextCovered = covered.has(pitch) ? covered : new Set(covered).add(pitch);
+      recurse(stringIndex - 1, true, nextMin, nextMax, soundingStrings + 1, nextCovered);
+    }
+    frets[stringIndex] = -1;
+  };
+
+  recurse(5, false, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, 0, new Set());
+  return results;
+}
+
+function isBetterVoicing(candidate: RawVoicing, current: RawVoicing): boolean {
+  if (candidate.coverage !== current.coverage) return candidate.coverage > current.coverage;
+  if (candidate.soundingStrings !== current.soundingStrings) return candidate.soundingStrings > current.soundingStrings;
+  return candidate.fingerCount < current.fingerCount;
+}
+
+function toVoicing(raw: RawVoicing): ChordVoicing {
+  const frets = raw.frets;
+  const distinctFrets = [...new Set(frets.filter((fret) => fret > 0))].sort((left, right) => left - right);
+  const fingerByFret = new Map<number, number>(distinctFrets.map((fret, index) => [fret, index + 1]));
+  const fingerPositions = frets.map((fret) => (fret > 0 ? fingerByFret.get(fret) ?? 0 : 0));
+  // Un traste compartido por 2+ cuerdas implica dedo índice en cejilla: el dedo se apoya en todo
+  // el ancho de cuerdas que suenan, aunque otros dedos pisen trastes más altos en medio.
+  let barre: ChordVoicing["barre"];
+  if (distinctFrets.length > 0) {
+    const lowestFret = distinctFrets[0];
+    const soundingIndices = frets.reduce<number[]>((acc, fret, index) => { if (fret !== -1) acc.push(index); return acc; }, []);
+    const atLowestCount = frets.filter((fret) => fret === lowestFret).length;
+    if (atLowestCount >= 2 && soundingIndices.length > 0) barre = { fret: lowestFret, fromString: soundingIndices[0], toString: soundingIndices[soundingIndices.length - 1] };
   }
-  if (state.base === "minor" && state.seventh === "none") {
-    addShape("Forma E menor", 5, [0, 2, 2, 0, 0, 0], [1, 3, 4, 0, 1, 1]);
-    addShape("Forma A menor", 4, [-1, 0, 2, 2, 1, 0], [0, 1, 3, 4, 2, 1]);
-    addShape("Forma D menor", 3, [-1, -1, 0, 2, 3, 1], [0, 0, 0, 2, 3, 1]);
-  }
-  if (state.base === "major" && state.seventh === "7") {
-    addShape("Forma E dominante 7", 5, [0, 2, 0, 1, 0, 0], [1, 3, 1, 2, 1, 1]);
-    addShape("Forma A dominante 7", 4, [-1, 0, 2, 0, 2, 0], [0, 1, 3, 0, 2, 0]);
-  }
-  return voicings.filter((voicing, index) => voicings.findIndex((item) => item.title === voicing.title && item.baseFret === voicing.baseFret) === index);
+  let rootStringIndex = 0;
+  for (let index = 5; index >= 0; index -= 1) { if (frets[index] !== -1) { rootStringIndex = index; break; } }
+  const position: ChordVoicing["position"] = raw.baseFret === 0 ? "abierta" : barre ? "cejilla" : "movible";
+  const title = position === "abierta" ? "Posición abierta" : position === "cejilla" ? `Cejilla (${rootStringIndex + 1}ª cuerda) · traste ${raw.baseFret}` : `Posición · traste ${raw.baseFret}`;
+  return { title, fretPositions: frets, fingerPositions, baseFret: raw.baseFret, position, barre };
+}
+
+// Se agrupa por traste base y se elige la mejor digitación de cada posición (más notas de color,
+// más cuerdas sonando y menos dedos), para cubrir todo el mástil sin saturar de variantes casi iguales.
+function selectVoicings(raws: readonly RawVoicing[], maxResults: number): ChordVoicing[] {
+  const byBaseFret = new Map<number, RawVoicing>();
+  raws.forEach((raw) => {
+    const current = byBaseFret.get(raw.baseFret);
+    if (!current || isBetterVoicing(raw, current)) byBaseFret.set(raw.baseFret, raw);
+  });
+  return [...byBaseFret.values()].sort((left, right) => left.baseFret - right.baseFret).slice(0, maxResults).map(toVoicing);
+}
+
+// La raíz, el tono que define la calidad (3ª/sus) y la séptima o sexta pedida nunca se omiten.
+// La quinta justa y las tensiones (9/11/13, add) son "color" opcional: suman cuando caben en el
+// tramo de 4 trastes, pero se pueden dejar fuera para que aparezcan muchas más posiciones jugables.
+function classifyBuilderIntervals(state: ChordBuilderState): { mustHave: number[]; niceToHave: number[] } {
+  const base = BASE_INTERVALS[state.base];
+  const fifth = state.fifth === "none" ? base[2] : FIFTH_INTERVALS[state.fifth];
+  const rawMustHave = [0, base[1]];
+  const rawNiceToHave: number[] = [];
+  if (fifth === 7) rawNiceToHave.push(fifth); else rawMustHave.push(fifth);
+  if (state.seventh !== "none") rawMustHave.push(SEVENTH_INTERVALS[state.seventh]);
+  state.extensions.filter((extension) => extension !== "none").forEach((extension) => rawNiceToHave.push(EXTENSION_INTERVALS[extension]));
+  state.additions.forEach((addition) => rawNiceToHave.push(ADDITION_INTERVALS[addition]));
+  const mustHave = uniqueIntervals(rawMustHave);
+  const niceToHave = uniqueIntervals(rawNiceToHave).filter((interval) => !mustHave.includes(interval));
+  return { mustHave, niceToHave };
+}
+
+export function findChordVoicings(state: ChordBuilderState, maxResults = MAX_VOICING_RESULTS): ChordVoicing[] {
+  const rootIndex = noteIndex(state.root);
+  const bassIndex = state.bass && state.bass !== "none" ? noteIndex(state.bass) : rootIndex;
+  if (rootIndex < 0 || bassIndex < 0) return [];
+  const { mustHave, niceToHave } = classifyBuilderIntervals(state);
+  return selectVoicings(searchVoicings(rootIndex, mustHave, niceToHave, bassIndex), maxResults);
+}
+
+// Variante genérica para el glosario y cualquier acorde definido solo por su lista de intervalos:
+// con más de dos notas, la quinta justa pasa a "color" opcional (igual que en el constructor).
+export function findVoicingsForIntervals(root: string, intervals: readonly number[], bass?: string, maxResults = MAX_VOICING_RESULTS): ChordVoicing[] {
+  const rootIndex = noteIndex(root);
+  const bassIndex = bass ? noteIndex(bass) : rootIndex;
+  if (rootIndex < 0 || bassIndex < 0 || intervals.length === 0) return [];
+  const canDropFifth = intervals.length > 2 && intervals.includes(7);
+  const mustHave = canDropFifth ? intervals.filter((interval) => interval !== 7) : [...intervals];
+  const niceToHave = canDropFifth ? [7] : [];
+  return selectVoicings(searchVoicings(rootIndex, mustHave, niceToHave, bassIndex), maxResults);
 }
 
 function pitchSet(intervals: readonly number[], rootIndex: number): Set<number> {

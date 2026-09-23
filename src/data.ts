@@ -1,13 +1,12 @@
 export const NOTES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"] as const;
 export type Note = (typeof NOTES)[number];
-
 export const TUNING = [4, 11, 7, 2, 9, 4] as const;
 export const STRINGS = ["e", "B", "G", "D", "A", "E"] as const;
 export const FRET_COUNT = 24;
-
 export interface ScaleData { label: string; intervals: readonly number[]; construction: string; harmony: string; blue?: number; }
 export type ScaleId = keyof typeof SCALES;
 const scale = (label: string, intervals: readonly number[], construction: string, harmony: string, blue?: number): ScaleData => ({ label, intervals, construction, harmony, blue });
+
 export const SCALES = {
   mayor: scale("Mayor (Jónico)", [0, 2, 4, 5, 7, 9, 11], "T-T-ST-T-T-T-ST", "I - ii - iii - IV - V - vi - vii°"),
   menor: scale("Menor natural (Eólico)", [0, 2, 3, 5, 7, 8, 10], "T-ST-T-T-ST-T-T", "i - ii° - III - iv - v - VI - VII"),
@@ -59,6 +58,7 @@ export const CAGED_QUALITIES: Record<CagedQuality, { label: string; chord: reado
   dim: { label: "Disminuida", chord: [0, 3, 6], pentatonic: [0, 3, 6], scale: [0, 2, 3, 5, 6, 8, 10] },
   aug: { label: "Aumentada", chord: [0, 4, 8], pentatonic: [0, 4, 8], scale: [0, 2, 4, 6, 8, 10] },
 } as const;
+
 export type CagedLayer = "chord" | "pentatonic" | "scale";
 export interface ChordGlossaryEntry {
   id: string;
@@ -71,7 +71,9 @@ export interface ChordGlossaryEntry {
   voicing: "abierto" | "cerrado" | "mixto";
   level: "principiante" | "avanzado";
   description: string;
+  bass?: Note;
 }
+
 export const CHORD_CATEGORIES = [
   "Todos",
   "Principiantes",
@@ -81,6 +83,7 @@ export const CHORD_CATEGORIES = [
   "Alterados y suspendidos",
   "Jazz y especiales",
 ] as const;
+
 export const CHORD_GLOSSARY: readonly ChordGlossaryEntry[] = [
   { id: "Major", name: "Mayor", symbol: "C", category: "Principiantes", family: "Triadas", intervals: [0, 4, 7], formula: "1 - 3 - 5", voicing: "abierto", level: "principiante", description: "Base luminosa formada por raíz, tercera mayor y quinta justa." },
   { id: "minor", name: "Menor", symbol: "Cm", category: "Principiantes", family: "Triadas", intervals: [0, 3, 7], formula: "1 - b3 - 5", voicing: "abierto", level: "principiante", description: "Triada menor con tercera menor; conserva la quinta justa." },
@@ -100,8 +103,9 @@ export const CHORD_GLOSSARY: readonly ChordGlossaryEntry[] = [
   { id: "eleven", name: "Onceava dominante", symbol: "C11", category: "Extensiones", family: "Onceavas", intervals: [0, 4, 7, 10, 2, 5], formula: "1 - 3 - 5 - b7 - 9 - 11", voicing: "cerrado", level: "avanzado", description: "Extensión amplia de dominante; algunos voicings omiten la tercera." },
   { id: "thirteen", name: "Treceava dominante", symbol: "C13", category: "Extensiones", family: "Treceavas", intervals: [0, 4, 7, 10, 2, 5, 9], formula: "1 - 3 - 5 - b7 - 9 - 11 - 13", voicing: "cerrado", level: "avanzado", description: "Color completo de dominante con sexta como treceava." },
   { id: "hendrix", name: "Acorde de Hendrix", symbol: "C7#9", category: "Jazz y especiales", family: "Alterados", intervals: [0, 4, 7, 10, 3], formula: "1 - 3 - 5 - b7 - #9", voicing: "cerrado", level: "avanzado", description: "Dominante con #9, asociado al sonido de rock psicodélico y blues." },
-  { id: "slash", name: "Acorde slash", symbol: "C/E", category: "Jazz y especiales", family: "Inversiones", intervals: [0, 4, 7], formula: "Triada / bajo alternativo", voicing: "mixto", level: "avanzado", description: "Un acorde con una nota de bajo específica, por ejemplo C mayor sobre E." },
+  { id: "slash", name: "Acorde slash", symbol: "C/E", category: "Jazz y especiales", family: "Inversiones", intervals: [0, 4, 7], formula: "Triada / bajo alternativo", voicing: "mixto", level: "avanzado", description: "Un acorde con una nota de bajo específica, por ejemplo C mayor sobre E.", bass: "E" },
   { id: "minor-Major7", name: "Menor con séptima mayor", symbol: "CmMaj7", category: "Jazz y especiales", family: "Séptimas", intervals: [0, 3, 7, 11], formula: "1 - b3 - 5 - 7", voicing: "cerrado", level: "avanzado", description: "Contraste entre tercera menor y séptima mayor, típico de cine y jazz." },
 ] as const;
-export type ModuleId = "acordes" | "glosario" | "buscador" | "triadas" | "arp" | "esc" | "ds" | "caged";
+
+export type ModuleId = "inicio" | "acordes" | "glosario" | "buscador" | "triadas" | "arp" | "esc" | "ds" | "caged";
 export const INTERVAL_LABELS = ["1", "b2", "2", "b3", "3", "4", "b5", "5", "b6", "6", "b7", "7"] as const;
