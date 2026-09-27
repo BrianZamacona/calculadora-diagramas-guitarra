@@ -203,7 +203,8 @@ export function renderCAGEDFretboard(
 
   // ── Cuerdas (líneas horizontales) ──────────────────────────
   for (let s = 0; s < 6; s++) {
-    const y = boardY + s * LAYOUT.stringHeight + LAYOUT.stringHeight / 2;
+    const visualRow = 5 - s;
+    const y = boardY + visualRow * LAYOUT.stringHeight + LAYOUT.stringHeight / 2;
     const string = svgEl("line");
     setAttrs(string, {
       x1: LAYOUT.leftMargin, y1: y, x2: svgW - LAYOUT.rightPad, y2: y,
@@ -250,20 +251,22 @@ export function renderCAGEDFretboard(
 
       if (isMuted || (!noteOnThisString && !isOpen)) {
         // X muda
+        const visualRow = 5 - s;
         const indicX = svgEl("text");
         setAttrs(indicX, {
-          x: LAYOUT.leftMargin + s * ((svgW - LAYOUT.leftMargin - LAYOUT.rightPad) / 6) + (svgW - LAYOUT.leftMargin - LAYOUT.rightPad) / 12,
-          y: boardY - 8,
+          x: LAYOUT.leftMargin - 15,
+          y: boardY + visualRow * LAYOUT.stringHeight + LAYOUT.stringHeight / 2 + 4,
           "text-anchor": "middle", fill: COLORS.mutedColor,
           "font-size": 13, "font-weight": "bold", "font-family": "Inter,system-ui,sans-serif",
         });
         indicX.textContent = "×";
         svg.append(indicX);
       } else if (isOpen) {
+        const visualRow = 5 - s;
         const indicO = svgEl("text");
         setAttrs(indicO, {
-          x: LAYOUT.leftMargin + s * ((svgW - LAYOUT.leftMargin - LAYOUT.rightPad) / 6) + (svgW - LAYOUT.leftMargin - LAYOUT.rightPad) / 12,
-          y: boardY - 8,
+          x: LAYOUT.leftMargin - 15,
+          y: boardY + visualRow * LAYOUT.stringHeight + LAYOUT.stringHeight / 2 + 4,
           "text-anchor": "middle", fill: COLORS.openColor,
           "font-size": 13, "font-weight": "bold", "font-family": "Inter,system-ui,sans-serif",
         });
@@ -279,8 +282,8 @@ export function renderCAGEDFretboard(
     if (fret >= startFret && fret <= endFret) {
       const col = fret - startFret;
       const cx = nutX + col * LAYOUT.fretWidth + LAYOUT.fretWidth / 2;
-      const y1 = boardY + toStr * LAYOUT.stringHeight + LAYOUT.stringHeight / 2;
-      const y2 = boardY + fromString * LAYOUT.stringHeight + LAYOUT.stringHeight / 2;
+      const y1 = boardY + (5 - toStr) * LAYOUT.stringHeight + LAYOUT.stringHeight / 2;
+      const y2 = boardY + (5 - fromString) * LAYOUT.stringHeight + LAYOUT.stringHeight / 2;
       const barreH = Math.abs(y2 - y1) + LAYOUT.noteRadius * 2;
       const barreY = Math.min(y1, y2) - LAYOUT.noteRadius;
       const barre = svgEl("rect");
@@ -304,7 +307,8 @@ export function renderCAGEDFretboard(
     if (fret < startFret || fret > endFret) continue;
     const col = fret - startFret;
     const cx = nutX + col * LAYOUT.fretWidth + LAYOUT.fretWidth / 2;
-    const cy = boardY + s * LAYOUT.stringHeight + LAYOUT.stringHeight / 2;
+    const visualRow = 5 - s;
+    const cy = boardY + visualRow * LAYOUT.stringHeight + LAYOUT.stringHeight / 2;
     const isRoot = interval === 0;
 
     // Círculo

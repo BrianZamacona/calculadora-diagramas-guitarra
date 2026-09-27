@@ -195,18 +195,20 @@ function fingeringDiagram(fingering: ChordVoicing, root: string): HTMLElement {
   const card = el("article", "chord-diagram-card"); const title = el("h3"); title.textContent = fingering.title; card.append(title);
   const frets = fingering.fretPositions; const fretted = frets.filter((fret) => fret > 0); const maxFret = fretted.length > 0 ? Math.max(...fretted) : 1; const minFret = fingering.baseFret > 1 ? fingering.baseFret : 1;
   const diagram = el("div", "fingering-diagram"); diagram.style.gridTemplateColumns = "repeat(6, 34px)";
-  frets.forEach((fret) => { const marker = el("span", "fingering-open"); marker.textContent = fret === -1 ? "x" : fret === 0 ? "o" : ""; diagram.append(marker); });
+  [5, 4, 3, 2, 1, 0].forEach((stringIndex) => { const fret = frets[stringIndex]; const marker = el("span", "fingering-open"); marker.textContent = fret === -1 ? "x" : fret === 0 ? "o" : ""; diagram.append(marker); });
   if (fingering.barre) {
     const rowIndex = fingering.barre.fret - minFret;
     if (rowIndex >= 0) {
       const bar = el("span", "fingering-barre");
-      bar.style.left = `${8 + fingering.barre.fromString * 34}px`;
-      bar.style.width = `${(fingering.barre.toString - fingering.barre.fromString + 1) * 34}px`;
+      const leftCol = 5 - Math.max(fingering.barre.fromString, fingering.barre.toString);
+      const rightCol = 5 - Math.min(fingering.barre.fromString, fingering.barre.toString);
+      bar.style.left = `${8 + leftCol * 34}px`;
+      bar.style.width = `${(rightCol - leftCol + 1) * 34}px`;
       bar.style.top = `${7 + 25 + rowIndex * 34}px`;
       diagram.append(bar);
     }
   }
-  for (let fret = minFret; fret <= Math.max(minFret + 3, maxFret); fret += 1) for (let stringIndex = 0; stringIndex < 6; stringIndex += 1) { const cell = el("div", "fingering-cell"); if (frets[stringIndex] === fret) { const dot = el("span", `diagram-note ${noteAt(stringIndex, fret) === root ? "root" : ""}`); dot.textContent = String(fingering.fingerPositions[stringIndex] || ""); dot.setAttribute("aria-label", `${noteAt(stringIndex, fret)}, dedo ${fingering.fingerPositions[stringIndex]}`); cell.append(dot); } diagram.append(cell); }
+  for (let fret = minFret; fret <= Math.max(minFret + 3, maxFret); fret += 1) { [5, 4, 3, 2, 1, 0].forEach((stringIndex) => { const cell = el("div", "fingering-cell"); if (frets[stringIndex] === fret) { const dot = el("span", `diagram-note ${noteAt(stringIndex, fret) === root ? "root" : ""}`); dot.textContent = String(fingering.fingerPositions[stringIndex] || ""); dot.setAttribute("aria-label", `${noteAt(stringIndex, fret)}, dedo ${fingering.fingerPositions[stringIndex]}`); cell.append(dot); } diagram.append(cell); }); }
   card.append(diagram); return card;
 }
 function chordBuilderView(state: State, onChange: () => void): HTMLElement {
@@ -263,7 +265,8 @@ function board(marks: FretMark[], range: Range, display: DisplayMode, cagedBoxes
   const wrapper = el("div", "board-wrap"); const fretColumns = range.end - range.start + 1; const boardElement = el("div", `board frets-${fretColumns}`); wrapper.classList.add(`range-${fretColumns}`);
   for (let fret = range.start; fret <= range.end; fret += 1) { const number = el("div", "fret-number"); number.textContent = String(fret); boardElement.append(number); }
   cagedBoxes.forEach((box) => boardElement.append(cagedBoxElement(box, range)));
-  for (let stringIndex = 0; stringIndex < STRINGS.length; stringIndex += 1) {
+  const reversedStrings = [5, 4, 3, 2, 1, 0];
+  for (const stringIndex of reversedStrings) {
     const stringNumber = stringIndex + 1;
     for (let fret = range.start; fret <= range.end; fret += 1) {
       const inlay = [3, 5, 7, 9].includes(fret) && (stringIndex === 2 || stringIndex === 3) ? " inlay-single" : fret === 12 && (stringIndex === 1 || stringIndex === 2 || stringIndex === 3 || stringIndex === 4) ? " inlay-double" : "";
