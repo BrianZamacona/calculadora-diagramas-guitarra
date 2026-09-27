@@ -14,9 +14,10 @@ export default defineConfig({
 
 function securityHeaders(): Record<string, string> {
   return {
-    "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' ws:; img-src 'self' data:; base-uri 'self'; form-action 'self'",
+    // blob: required for Tone.js AudioWorklets and jsPDF/MIDI file downloads
+    "Content-Security-Policy": "default-src 'self'; script-src 'self' blob:; worker-src 'self' blob:; style-src 'self'; connect-src 'self' ws: blob:; img-src 'self' data: blob:; media-src blob:; base-uri 'self'; form-action 'self'",
     "Referrer-Policy": "strict-origin-when-cross-origin",
     "X-Content-Type-Options": "nosniff",
     "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
   };
-}
+}

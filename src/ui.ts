@@ -1,5 +1,6 @@
 import { ARPEGGIOS, CHORD_CATEGORIES, CHORD_GLOSSARY, CAGED_QUALITIES, CAGED_SHAPES, FRET_COUNT, NOTES, SCALES, STRINGS, type ArpeggioId, type CagedLayer, type CagedQuality, type CagedShape, type ChordGlossaryEntry, type ModuleId, type ScaleId } from "./data";
 import { buildChord, clampRange, findChordVoicings, findCagedBoxes, findCagedLayerMarks, findDoubleStops, findMarks, findScaleMarks, findVoicingMarks, findVoicingsForIntervals, noteAt, suggestNoteSets, type ChordBase, type ChordBuilderState, type ChordVoicing, type CagedWindow, type FretMark, type Range, type ScaleSystem } from "./domain";
+import { mountCagedModule } from "./cagedModule";
 
 type DisplayMode = "notes" | "intervals" | "both";
 interface State { module: ModuleId; root: string; scale: ScaleId; scaleSystem: ScaleSystem; arpeggio: ArpeggioId; arpeggioMode: "full" | "drop2-14" | "drop2-25"; stringSet: number; cagedShape: CagedShape; cagedQuality: CagedQuality; cagedLayer: CagedLayer; display: DisplayMode; start: number; end: number; doubleStop: number; chordCategory: string; searchQuery: string; searchNotes: string[]; chordBuilder: ChordBuilderState; }
@@ -298,6 +299,8 @@ export function mountApp(root: HTMLElement): void {
     if (state.module === "acordes") { content.append(chordBuilderView(state, draw)); return; }
     if (state.module === "glosario") { content.append(chordCatalogView(state, draw)); return; }
     if (state.module === "buscador") { content.append(searchView(state, draw)); return; }
+    // Módulo CAGED avanzado: delegar al nuevo motor de voicings + SVG
+    if (state.module === "caged") { mountCagedModule(content); return; }
     content.append(controls(state, draw));
     if (state.module === "esc") {
       const theory = el("div", "theory");

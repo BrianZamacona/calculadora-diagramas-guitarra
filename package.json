@@ -14,5 +14,10 @@
     "typescript": "^5.6.3",
     "vite": "^6.0.5",
     "vitest": "^5.0.1"
+  },
+  "dependencies": {
+    "@tonejs/midi": "^2.0.28",
+    "jspdf": "^4.2.1",
+    "tone": "^15.1.22"
   }
 }
