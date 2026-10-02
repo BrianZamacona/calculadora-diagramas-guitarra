@@ -1,5 +1,5 @@
-import { ARPEGGIOS, CHORD_CATEGORIES, CHORD_GLOSSARY, CAGED_QUALITIES, CAGED_SHAPES, FRET_COUNT, NOTES, SCALES, STRINGS, type ArpeggioId, type CagedLayer, type CagedQuality, type CagedShape, type ChordGlossaryEntry, type ModuleId, type ScaleId } from "./data";
-import { buildChord, clampRange, findChordVoicings, findCagedBoxes, findCagedLayerMarks, findDoubleStops, findMarks, findScaleMarks, findVoicingMarks, findVoicingsForIntervals, noteAt, suggestNoteSets, type ChordBase, type ChordBuilderState, type ChordVoicing, type CagedWindow, type FretMark, type Range, type ScaleSystem } from "./domain";
+import { ARPEGGIOS, CHORD_CATEGORIES, CHORD_GLOSSARY, CAGED_QUALITIES, CAGED_SHAPES, FRET_COUNT, NOTES, SCALES, STRINGS, type ArpeggioId, type CagedLayer, type CagedQuality, type CagedShape, type ChordGlossaryEntry, type ModuleId, type ScaleId } from "./data/data";
+import { buildChord, clampRange, findChordVoicings, findCagedBoxes, findCagedLayerMarks, findDoubleStops, findMarks, findScaleMarks, findVoicingMarks, findVoicingsForIntervals, noteAt, suggestNoteSets, type ChordBase, type ChordBuilderState, type ChordVoicing, type CagedWindow, type FretMark, type Range, type ScaleSystem } from "./utils/domain";
 import { mountCagedModule } from "./cagedModule";
 
 type DisplayMode = "notes" | "intervals" | "both";

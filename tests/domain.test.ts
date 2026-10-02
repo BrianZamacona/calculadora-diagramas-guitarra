@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildChord, clampRange, findCagedMarks, findChordVoicings, findDoubleStops, findMarks, findScaleMarks, findVoicingsForIntervals, noteAt, suggestNoteSets } from "../src/domain";
+import { buildChord, clampRange, findCagedMarks, findChordVoicings, findDoubleStops, findMarks, findScaleMarks, findVoicingsForIntervals, noteAt, suggestNoteSets } from "../src/utils/domain";
 
 describe("domain musical", () => {
   it("normaliza rangos fuera de los límites del mástil", () => {

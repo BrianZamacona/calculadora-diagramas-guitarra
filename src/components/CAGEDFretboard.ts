@@ -14,7 +14,7 @@
  *  - Exportación directa a SVG
  */
 
-import { INTERVAL_NAMES, type CagedPositionVoicing } from "./chordEngine";
+import { INTERVAL_NAMES, type CagedPositionVoicing } from "../utils/chordEngine";
 
 // ─── Constantes de layout ──────────────────────────────────────
 const SVG_NS = "http://www.w3.org/2000/svg";

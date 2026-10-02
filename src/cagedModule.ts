@@ -12,7 +12,7 @@
  *  - Exportación SVG, PDF y MIDI
  */
 
-import { NOTES, type Note } from "./data";
+import { NOTES, type CagedQuality, type Note } from "./data/data";
 import {
   buildCagedVoicings,
   buildProgressionChords,
@@ -22,11 +22,10 @@ import {
   type CagedPositionVoicing,
   type AlternateShapeId,
   type ChordQualityId,
-} from "./chordEngine";
-import { renderCAGEDFretboard, exportSVGToFile } from "./CAGEDFretboard";
-import { playArpeggio, playStrum, stopAudio, setAudioBPM } from "./audio";
-import { exportProgressionPDF, exportProgressionMIDI } from "./exportService";
-import type { CagedQuality } from "./data";
+} from "./utils/chordEngine";
+import { renderCAGEDFretboard, exportSVGToFile } from "./components/CAGEDFretboard";
+import { playArpeggio, playStrum, stopAudio, setAudioBPM } from "./services/audio";
+import { exportProgressionPDF, exportProgressionMIDI } from "./services/exportService";
 
 // ─── Tipos internos ────────────────────────────────────────────
 

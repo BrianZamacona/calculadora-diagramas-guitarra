@@ -12,9 +12,9 @@
  *  - Alternate shapes: sus2, sus4, add2, m11, M9.
  */
 
-import { NOTES, type Note } from "./data";
-import { noteIndex } from "./domain";
-import { CAGED_TEMPLATES, computeAnchorFret, resolveCagedNotes, type CagedTemplate } from "./cagedTemplates";
+import { NOTES, type Note } from "../data/data";
+import { addInterval, MusicNote } from "./domain";
+import { CAGED_TEMPLATES, computeAnchorFret, resolveCagedNotes, type CagedTemplate } from "../data/cagedTemplates";
 
 // ─── Tipos base ────────────────────────────────────────────────
 
@@ -30,9 +30,6 @@ export type ChordQualityId =
 
 export type CagedShapeId = "C" | "A" | "G" | "E" | "D";
 
-/** Intervalo en semitonos desde la raíz */
-export type Semitones = number;
-
 /** Definición de un tipo de acorde */
 export interface ChordQuality {
   id: ChordQualityId;
@@ -40,9 +37,9 @@ export interface ChordQuality {
   /** Familia a la que pertenece */
   family: "triada" | "septima" | "extension" | "voicing" | "alternativo";
   /** Intervalos obligatorios en semitonos */
-  intervals: Semitones[];
+  intervals: number[];
   /** Intervalos opcionales (color) */
-  optional?: Semitones[];
+  optional?: number[];
   symbol: string;
 }
 
@@ -96,6 +93,8 @@ export type RomanNumeral = "I" | "ii" | "iii" | "IV" | "V" | "vi" | "vii°";
 /** Un grado de la progresión: qué traste relativo y qué calidad. */
 export interface ProgressionDegree {
   numeral: RomanNumeral;
+  /** Grado diatónico desde la tónica (0 = I) */
+  steps: number;
   /** Semitonos desde la tónica */
   semitones: number;
   quality: ChordQualityId;
@@ -109,14 +108,14 @@ export interface Progression {
 }
 
 /** Grados diatónicos mayores (semitones desde la tónica) */
-const MAJOR_SCALE_DEGREES: Record<RomanNumeral, { semitones: number; quality: ChordQualityId }> = {
-  "I": { semitones: 0, quality: "Maj" },
-  "ii": { semitones: 2, quality: "min" },
-  "iii": { semitones: 4, quality: "min" },
-  "IV": { semitones: 5, quality: "Maj" },
-  "V": { semitones: 7, quality: "Maj" },
-  "vi": { semitones: 9, quality: "min" },
-  "vii°": { semitones: 11, quality: "dim" },
+const MAJOR_SCALE_DEGREES: Record<RomanNumeral, { steps: number; semitones: number; quality: ChordQualityId }> = {
+  "I": { steps: 0, semitones: 0, quality: "Maj" },
+  "ii": { steps: 1, semitones: 2, quality: "min" },
+  "iii": { steps: 2, semitones: 4, quality: "min" },
+  "IV": { steps: 3, semitones: 5, quality: "Maj" },
+  "V": { steps: 4, semitones: 7, quality: "Maj" },
+  "vi": { steps: 5, semitones: 9, quality: "min" },
+  "vii°": { steps: 6, semitones: 11, quality: "dim" },
 };
 
 function buildProgression(
@@ -131,6 +130,7 @@ function buildProgression(
     volume,
     degrees: numerals.map((numeral) => ({
       numeral,
+      steps: MAJOR_SCALE_DEGREES[numeral].steps,
       semitones: MAJOR_SCALE_DEGREES[numeral].semitones,
       quality: MAJOR_SCALE_DEGREES[numeral].quality,
     })),
@@ -165,19 +165,37 @@ export const ALTERNATE_SHAPE_MAP: Partial<Record<ChordQualityId, Record<Alternat
 // ─── Acordes transpuestos ──────────────────────────────────────
 
 export interface TransposedChord {
-  root: Note;
+  root: string;
   quality: ChordQuality;
   /** Notas reales del acorde */
-  notes: Note[];
+  notes: string[];
   /** Nombre del cifrado */
   name: string;
 }
 
-/** Transpone una calidad a una raíz dada */
-export function buildTransposedChord(root: Note, qualityId: ChordQualityId): TransposedChord {
+function diatonicStepsForInterval(interval: number, qualityId: ChordQualityId): number {
+  if (interval === 9 && qualityId === "dim7") return 6;
+  if (interval === 0) return 0;
+  if (interval <= 2) return 1;
+  if (interval <= 4) return 2;
+  if (interval === 5) return 3;
+  if (interval <= 8) return 4;
+  if (interval === 9) return 5;
+  return 6;
+}
+
+function progressionRoot(tonicRoot: Note, degree: ProgressionDegree): string {
+  const tonic = MusicNote.parse(tonicRoot);
+  return addInterval(tonic, { steps: degree.steps, semitones: degree.semitones }).toString();
+}
+
+/** Transpone una calidad a una raíz dada, conservando la escritura diatónica. */
+export function buildTransposedChord(root: string, qualityId: ChordQualityId): TransposedChord {
   const quality = CHORD_QUALITIES[qualityId];
-  const rootIdx = noteIndex(root);
-  const notes = quality.intervals.map((interval) => NOTES[(rootIdx + interval) % 12]);
+  const rootNote = MusicNote.parse(root);
+  const notes = quality.intervals.map((interval) =>
+    addInterval(rootNote, { steps: diatonicStepsForInterval(interval, qualityId), semitones: interval }).toString(),
+  );
   return {
     root,
     quality,
@@ -194,9 +212,8 @@ export function buildProgressionChords(
 ): TransposedChord[] {
   const prog = PROGRESSIONS.find((p) => p.id === progressionId);
   if (!prog) return [];
-  const tonicIdx = noteIndex(tonicRoot);
   return prog.degrees.map((degree) => {
-    const chordRoot = NOTES[(tonicIdx + degree.semitones) % 12];
+    const chordRoot = progressionRoot(tonicRoot, degree);
     let qualityId = degree.quality;
     if (alternate && ALTERNATE_SHAPE_MAP[qualityId]?.[alternate]) {
       qualityId = ALTERNATE_SHAPE_MAP[qualityId]![alternate]!;
@@ -220,10 +237,11 @@ export interface CagedPositionVoicing {
  * dadas. Para cada forma itera octava 0 (+0) y octava 1 (+12).
  */
 export function buildCagedVoicings(
-  root: Note,
+  root: string,
   quality: "major" | "minor" = "major",
 ): CagedPositionVoicing[] {
-  const rootPitch = noteIndex(root);
+  const rootSemitones = MusicNote.parse(root).absoluteSemitones;
+  const rootPitch = ((rootSemitones % 12) + 12) % 12;
   const shapes: CagedShapeId[] = ["C", "A", "G", "E", "D"];
   const result: CagedPositionVoicing[] = [];
 
@@ -309,9 +327,8 @@ export function progressionNotes(
 ): Array<{ chord: TransposedChord; degree: ProgressionDegree }> {
   const prog = PROGRESSIONS.find((p) => p.id === progressionId);
   if (!prog) return [];
-  const tonicIdx = noteIndex(tonicRoot);
   return prog.degrees.map((degree) => {
-    const chordRoot = NOTES[(tonicIdx + degree.semitones) % 12];
+    const chordRoot = progressionRoot(tonicRoot, degree);
     return {
       chord: buildTransposedChord(chordRoot, degree.quality),
       degree,

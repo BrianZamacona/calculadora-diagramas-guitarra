@@ -1,4 +1,8 @@
-import { ARPEGGIOS, CHORD_GLOSSARY, CAGED_QUALITIES, CAGED_SHAPES, FRET_COUNT, NOTES, SCALES, TUNING, type CagedLayer, type CagedQuality, type CagedShape, type Note } from "./data";
+import {
+  ARPEGGIOS, CHORD_GLOSSARY, CAGED_QUALITIES, CAGED_SHAPES, FRET_COUNT,
+  NOTES, SCALES, TUNING,
+  type CagedLayer, type CagedQuality, type CagedShape, type Note, type ScaleId
+} from "../data/data";
 
 export type MarkKind = "root" | "chord" | "scale" | "blue";
 export interface FretMark { stringIndex: number; fret: number; note: Note; interval: string; kind: MarkKind; }
@@ -53,35 +57,82 @@ const ADDITION_INTERVALS: Record<AdditionModifier, number> = { add2: 2, add4: 5,
 function uniqueIntervals(intervals: number[]): number[] { return intervals.filter((interval, index) => intervals.indexOf(interval) === index); }
 function extensionLabel(extension: ExtensionModifier): string { return extension === "none" ? "" : extension; }
 
+// Mapeo de semitonos a especificación de grado diatónico (steps = grado - 1)
+const INTERVAL_TO_STEPS: Record<number, number> = {
+  0: 0,   // Unísono (1)
+  1: 1,   // 2da menor (b2)
+  2: 1,   // 2da mayor (2/9)
+  3: 2,   // 3ra menor (b3)
+  4: 2,   // 3ra mayor (3)
+  5: 3,   // 4ta perfecta (4/11)
+  6: 3,   // 4ta aumentada / 5ta disminuida (#4/b5) -> 4ta o 5ta según contexto
+  7: 4,   // 5ta perfecta (5)
+  8: 4,   // 5ta aumentada / 6ta menor (#5/b6)
+  9: 5,   // 6ta mayor / 7ma disminuida (6/bb7)
+  10: 6,  // 7ma menor (b7)
+  11: 6,  // 7ma mayor (7M)
+};
+
 export function buildChord(state: ChordBuilderState): BuiltChord {
   const rootIndex = noteIndex(state.root);
   if (rootIndex < 0) return { name: "", notes: [], intervals: [] };
+
   const intervals = [...BASE_INTERVALS[state.base]];
   if (state.fifth !== "none") intervals[intervals.length - 1] = FIFTH_INTERVALS[state.fifth];
   if (state.seventh !== "none") intervals.push(SEVENTH_INTERVALS[state.seventh]);
-  state.extensions.filter((extension) => extension !== "none").forEach((extension) => intervals.push(EXTENSION_INTERVALS[extension]));
+
+  state.extensions
+    .filter((extension) => extension !== "none")
+    .forEach((extension) => intervals.push(EXTENSION_INTERVALS[extension]));
+
   state.additions.forEach((addition) => intervals.push(ADDITION_INTERVALS[addition]));
+
   const normalizedIntervals = uniqueIntervals(intervals);
-  const notes = normalizedIntervals.map((interval) => NOTES[(rootIndex + interval) % NOTES.length]);
-  const bass = state.bass && state.bass !== "none" && noteIndex(state.bass) >= 0 ? state.bass as Note : undefined;
+
+  // ✅ REEMPLAZO CORE: Instanciar la nota raíz usando MusicNote y calcular cada nota diatónicamente
+  const rootNote = MusicNote.parse(state.root);
+  const notes = normalizedIntervals.map((semitones) => {
+    // Para 5ta disminuida (6 semitonos en b5) asignamos 4 pasos (grado 5)
+    let steps = INTERVAL_TO_STEPS[semitones] ?? 0;
+    if (semitones === 6 && state.fifth === "b5") steps = 4;
+
+    const targetNote = addInterval(rootNote, { steps, semitones });
+    return targetNote.toString() as Note;
+  });
+
+  const bass = state.bass && state.bass !== "none" && noteIndex(state.bass) >= 0 ? (state.bass as Note) : undefined;
+
   const hasMinorThird = normalizedIntervals.includes(3);
   const hasMajorThird = normalizedIntervals.includes(4);
   const hasFlatSeven = normalizedIntervals.includes(10);
   const isDominantNinth = state.seventh === "7" && state.extensions.includes("9") && state.base === "major" && hasMajorThird && hasFlatSeven;
   const isMajorNinth = state.seventh === "7M" && state.extensions.includes("9") && state.base === "major";
+
   let suffix = state.base === "minor" ? "m" : state.base === "sus2" ? "sus2" : state.base === "sus4" ? "sus4" : state.base === "aug" ? "aug" : state.base === "dim" ? "dim" : "";
+
   if (isDominantNinth) suffix = "9";
   else if (isMajorNinth) suffix = "maj9";
   else if (state.seventh === "7M") suffix += "maj7";
   else if (state.seventh === "7") suffix += "7";
   else if (state.seventh === "6") suffix += "6";
+
   if (state.fifth === "b5" && state.base !== "dim") suffix += "b5";
   if (state.fifth === "#5" && state.base !== "aug") suffix += "#5";
-  state.extensions.filter((extension) => extension !== "none").forEach((extension) => {
-    if (!(isDominantNinth && extension === "9") && !(isMajorNinth && extension === "9")) suffix += extensionLabel(extension);
+
+  state.extensions
+    .filter((extension) => extension !== "none")
+    .forEach((extension) => {
+      if (!(isDominantNinth && extension === "9") && !(isMajorNinth && extension === "9")) suffix += extensionLabel(extension);
+    });
+
+  state.additions.forEach((addition) => {
+    if (!suffix.includes(addition)) suffix += addition;
   });
-  state.additions.forEach((addition) => { if (!suffix.includes(addition)) suffix += addition; });
-  if (state.base === "major" && state.fifth === "5" && state.seventh === "none" && state.extensions.length === 0 && state.additions.length === 0 && !hasMinorThird) suffix = "";
+
+  if (state.base === "major" && state.fifth === "5" && state.seventh === "none" && state.extensions.length === 0 && state.additions.length === 0 && !hasMinorThird) {
+    suffix = "";
+  }
+
   const name = `${state.root}${suffix}${bass ? `/${bass}` : ""}`;
   return { name, notes, intervals: normalizedIntervals, bass };
 }
@@ -383,4 +434,267 @@ export function findCagedLayerMarks(root: string, shape: CagedShape, quality: Ca
       const isChordTone = chordMarks.some((chord) => chord.stringIndex === mark.stringIndex && chord.fret === mark.fret);
       return isChordTone ? { ...mark, kind: mark.interval === "1" ? "root" as const : "chord" as const } : mark;
     });
+}
+// ==========================================
+// MODELO DE 2 DIMENSIONES PARA src/domain.ts
+// ==========================================
+
+export type Letter = 'C' | 'D' | 'E' | 'F' | 'G' | 'A' | 'B';
+export type Accidental = 'bb' | 'b' | '' | '#' | '##';
+
+export interface LetterInfo {
+  readonly index: number;
+  readonly semitones: number;
+}
+
+export const LETTERS: Record<Letter, LetterInfo> = {
+  C: { index: 0, semitones: 0 },
+  D: { index: 1, semitones: 2 },
+  E: { index: 2, semitones: 4 },
+  F: { index: 3, semitones: 5 },
+  G: { index: 4, semitones: 7 },
+  A: { index: 5, semitones: 9 },
+  B: { index: 6, semitones: 11 },
+};
+
+export const INDEX_TO_LETTER: Record<number, Letter> = {
+  0: 'C', 1: 'D', 2: 'E', 3: 'F', 4: 'G', 5: 'A', 6: 'B',
+};
+
+export const ACCIDENTAL_VALUES: Record<Accidental, number> = {
+  'bb': -2, 'b': -1, '': 0, '#': 1, '##': 2,
+};
+
+export const VALUE_TO_ACCIDENTAL: Record<number, Accidental> = {
+  '-2': 'bb', '-1': 'b', '0': '', '1': '#', '2': '##',
+};
+
+export class MusicNote {
+  constructor(
+    public readonly letter: Letter,
+    public readonly accidental: Accidental = '',
+    public readonly octave: number = 4
+  ) { }
+
+  get absoluteSemitones(): number {
+    return this.octave * 12 + LETTERS[this.letter].semitones + ACCIDENTAL_VALUES[this.accidental];
+  }
+
+  static parse(str: string, defaultOctave = 4): MusicNote {
+    const match = str.trim().match(/^([A-G])(bb|b|##|#)?(-?\d+)?$/);
+    if (!match) throw new Error(`Nota inválida: ${str}`);
+    return new MusicNote(
+      match[1] as Letter,
+      (match[2] || '') as Accidental,
+      match[3] !== undefined ? parseInt(match[3], 10) : defaultOctave
+    );
+  }
+
+  toString(includeOctave = false): string {
+    return `${this.letter}${this.accidental}${includeOctave ? this.octave : ''}`;
+  }
+}
+
+export interface IntervalSpec {
+  readonly steps: number;     // Grado diatónico (0 = Unísono, 1 = Segunda, 2 = Tercera...)
+  readonly semitones: number; // Distancia cromática real
+}
+
+/**
+ * ALGORITMO CORE: addInterval (3 pasos obligatorios)
+ */
+export function addInterval(root: MusicNote, interval: IntervalSpec): MusicNote {
+  const rootInfo = LETTERS[root.letter];
+
+  // Paso 1: Grado Diatónico (Módulo 7)
+  const rawIndex = rootInfo.index + interval.steps;
+  const newLetterIndex = ((rawIndex % 7) + 7) % 7;
+  const newLetter = INDEX_TO_LETTER[newLetterIndex];
+
+  // Paso 2: Cálculo de Octava
+  const newOctave = root.octave + Math.floor(rawIndex / 7);
+
+  // Paso 3: Ajuste Cromático (Diferencia de semitonos)
+  const targetSemitones = root.absoluteSemitones + interval.semitones;
+  const baseNaturalSemitones = newOctave * 12 + LETTERS[newLetter].semitones;
+  const diff = targetSemitones - baseNaturalSemitones;
+
+  const newAccidental = VALUE_TO_ACCIDENTAL[diff];
+  if (newAccidental === undefined) {
+    throw new Error(`Enarmonía no soportada (diferencia: ${diff})`);
+  }
+
+  return new MusicNote(newLetter, newAccidental, newOctave);
+}
+
+export interface ScaleFormula {
+  readonly name: string;
+  readonly description: string;
+  readonly intervals: IntervalSpec[];
+}
+
+export const SCALES_2D: Record<ScaleId, ScaleFormula> = {
+  "mayor": {
+    name: "Mayor (Ionian)",
+    description: "Alegría, estabilidad. La base de la música occidental.",
+    intervals: [
+      { steps: 0, semitones: 0 },
+      { steps: 1, semitones: 2 },
+      { steps: 2, semitones: 4 },
+      { steps: 3, semitones: 5 },
+      { steps: 4, semitones: 7 },
+      { steps: 5, semitones: 9 },
+      { steps: 6, semitones: 11 },
+    ]
+  },
+  "menor": {
+    name: "Menor Natural (Aeolian)",
+    description: "Tristeza, introspección. Tono nostálgico.",
+    intervals: [
+      { steps: 0, semitones: 0 },
+      { steps: 1, semitones: 2 },
+      { steps: 2, semitones: 3 },
+      { steps: 3, semitones: 5 },
+      { steps: 4, semitones: 7 },
+      { steps: 5, semitones: 8 },
+      { steps: 6, semitones: 10 },
+    ]
+  },
+  "armonica": {
+    name: "Menor Armónica",
+    description: "Sonido exótico, Oriente. Célula del tango y flamenco.",
+    intervals: [
+      { steps: 0, semitones: 0 },
+      { steps: 1, semitones: 2 },
+      { steps: 2, semitones: 3 },
+      { steps: 3, semitones: 5 },
+      { steps: 4, semitones: 7 },
+      { steps: 5, semitones: 8 },
+      { steps: 6, semitones: 11 }, // 7b y 7# simultáneas en la fórmula
+    ]
+  },
+  "melodica": {
+    name: "Menor Melódica",
+    description: "Elegancia jazzística. Ascendente: sube la 6ª y 7ª. Descendente: menor natural.",
+    intervals: [
+      { steps: 0, semitones: 0 },
+      { steps: 1, semitones: 2 },
+      { steps: 2, semitones: 3 },
+      { steps: 3, semitones: 5 },
+      { steps: 4, semitones: 7 },
+      { steps: 5, semitones: 9 }, // 6ª Mayor
+      { steps: 6, semitones: 11 },// 7ª Mayor
+    ]
+  },
+  "dorico": {
+    name: "Dórico",
+    description: "Suave, melancólico. Jazz, bossa nova, rock alternativo.",
+    intervals: [
+      { steps: 0, semitones: 0 },
+      { steps: 1, semitones: 2 },
+      { steps: 2, semitones: 3 },
+      { steps: 3, semitones: 5 },
+      { steps: 4, semitones: 7 },
+      { steps: 5, semitones: 9 },
+      { steps: 6, semitones: 10 },
+    ]
+  },
+  "frigio": {
+    name: "Frigio",
+    description: "Tensión, Flamenco, Metal. La segunda menor le da el color.",
+    intervals: [
+      { steps: 0, semitones: 0 },
+      { steps: 1, semitones: 1 },
+      { steps: 2, semitones: 3 },
+      { steps: 3, semitones: 5 },
+      { steps: 4, semitones: 7 },
+      { steps: 5, semitones: 8 },
+      { steps: 6, semitones: 10 },
+    ]
+  },
+  "lidio": {
+    name: "Lidio",
+    description: "Ensueño, magia. La cuarta aumentada flotante crea ingravidez.",
+    intervals: [
+      { steps: 0, semitones: 0 },
+      { steps: 1, semitones: 2 },
+      { steps: 2, semitones: 4 },
+      { steps: 3, semitones: 6 },  // #4
+      { steps: 4, semitones: 7 },  // 5ta justa
+      { steps: 5, semitones: 9 },  // 6ta mayor
+      { steps: 6, semitones: 11 }, // 7ma mayor
+    ]
+  },
+  "mixolidio": {
+    name: "Mixolidio",
+    description: "Blues, Funk, Rock 'n Roll. Séptima menor sobre mayor.",
+    intervals: [
+      { steps: 0, semitones: 0 },
+      { steps: 1, semitones: 2 },
+      { steps: 2, semitones: 4 },
+      { steps: 3, semitones: 5 },
+      { steps: 4, semitones: 7 },
+      { steps: 5, semitones: 9 },
+      { steps: 6, semitones: 10 },
+    ]
+  },
+  "locrio": {
+    name: "Locrio",
+    description: "Tensión máxima. Inestable. Usado para disonancias deliberadas.",
+    intervals: [
+      { steps: 0, semitones: 0 },
+      { steps: 1, semitones: 1 },
+      { steps: 2, semitones: 3 },
+      { steps: 3, semitones: 5 },
+      { steps: 4, semitones: 6 }, // b5
+      { steps: 5, semitones: 8 },
+      { steps: 6, semitones: 10 },
+    ]
+  },
+  "pent-menor": {
+    name: "Pentatónica Menor",
+    description: "Blues y Rock clásico. La base de casi toda la guitarra eléctrica.",
+    intervals: [
+      { steps: 0, semitones: 0 },
+      { steps: 1, semitones: 3 },
+      { steps: 2, semitones: 5 },
+      { steps: 3, semitones: 7 },
+      { steps: 4, semitones: 10 },
+    ]
+  },
+  "pent-mayor": {
+    name: "Pentatónica Mayor",
+    description: "Sonido country y folk. Dulce y brillante.",
+    intervals: [
+      { steps: 0, semitones: 0 },
+      { steps: 1, semitones: 2 },
+      { steps: 2, semitones: 4 },
+      { steps: 3, semitones: 7 },
+      { steps: 4, semitones: 9 },
+    ]
+  },
+  "blues-menor": {
+    name: "Blues Menor",
+    description: "Pentatónica menor + Blue note (tritono). El sonido del blues profundo.",
+    intervals: [
+      { steps: 0, semitones: 0 },
+      { steps: 1, semitones: 3 },  // b3
+      { steps: 2, semitones: 5 },  // 4
+      { steps: 3, semitones: 6 },  // Blue Note (b5) -> 3 pasos (grado 4/5)
+      { steps: 4, semitones: 7 },  // 5
+      { steps: 5, semitones: 10 }, // b7
+    ]
+  },
+  "blues-mayor": {
+    name: "Blues Mayor",
+    description: "Pentatónica mayor con blue note. Sonido sureño y rockero.",
+    intervals: [
+      { steps: 0, semitones: 0 },
+      { steps: 1, semitones: 2 },
+      { steps: 2, semitones: 3 }, // Blue note
+      { steps: 3, semitones: 4 },
+      { steps: 4, semitones: 7 },
+      { steps: 5, semitones: 9 },
+    ]
+  }
 }

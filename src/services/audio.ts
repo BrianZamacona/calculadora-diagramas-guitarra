@@ -12,8 +12,8 @@
  */
 
 import * as Tone from "tone";
-import { NOTES, TUNING } from "./data";
-import { type CagedPositionVoicing } from "./chordEngine";
+import { NOTES, TUNING } from "../data/data";
+import { type CagedPositionVoicing } from "../utils/chordEngine";
 
 // ─── Estado del servicio ───────────────────────────────────────
 

@@ -12,7 +12,7 @@
 
 import { jsPDF } from "jspdf";
 import { Midi } from "@tonejs/midi";
-import { type CagedPositionVoicing, type TransposedChord } from "./chordEngine";
+import { type CagedPositionVoicing, type TransposedChord } from "../utils/chordEngine";
 
 // ─── SVG Export ────────────────────────────────────────────────
 

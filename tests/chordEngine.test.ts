@@ -18,13 +18,14 @@ import {
   cagedQualityToEngine,
   progressionNotes,
   type ChordQualityId,
-} from "../src/chordEngine";
+} from "../src/utils/chordEngine";
 import {
   computeAnchorFret,
   resolveCagedNotes,
   CAGED_TEMPLATES,
-} from "../src/cagedTemplates";
-import { NOTES, TUNING } from "../src/data";
+} from "../src/data/cagedTemplates";
+import { NOTES, TUNING } from "../src/data/data";
+import { MusicNote } from "../src/utils/domain";
 
 // ─── Plantillas CAGED ─────────────────────────────────────────
 
@@ -89,6 +90,19 @@ describe("cagedTemplates · ancla y resolución de notas", () => {
     expect(minorNotes.some((n) => n.interval === 3)).toBe(true);
   });
 
+  it("todas las notas de cada forma CAGED coinciden con su intervalo y traste", () => {
+    for (const template of Object.values(CAGED_TEMPLATES)) {
+      for (const quality of ["major", "minor"] as const) {
+        const notes = resolveCagedNotes(NOTES.indexOf("C"), template, quality);
+        notes.forEach((note) => {
+          const pitch = (TUNING[note.string] + note.fret) % 12;
+          expect((pitch + 12) % 12, `${template.shape} ${quality}, cuerda ${note.string}, traste ${note.fret}`).toBe(note.interval % 12);
+        });
+        expect(notes.every((note) => !template.muted.includes(note.string))).toBe(true);
+      }
+    }
+  });
+
   it("computa anclas correctas para las 12 tonalidades en la forma E", () => {
     const expectedAnchors: Record<string, number> = {
       C: 8, "C#": 9, D: 10, "D#": 11, E: 0, F: 1,
@@ -143,21 +157,25 @@ describe("chordEngine · buildTransposedChord", () => {
     expect(chord.notes).toContain("E");
   });
 
-  it("Bdim7 tiene notas B, D, F, G#", () => {
+  it("Bdim7 tiene notas B, D, F, Ab", () => {
     const chord = buildTransposedChord("B", "dim7");
     expect(chord.notes).toContain("B");
     expect(chord.notes).toContain("D");
     expect(chord.notes).toContain("F");
-    expect(chord.notes).toContain("G#");
+    expect(chord.notes).toContain("Ab");
+  });
+
+  it("conserva la ortografía diatónica en acordes con sostenidos", () => {
+    expect(buildTransposedChord("C#", "Maj").notes).toEqual(["C#", "E#", "G#"]);
   });
 
   it("transpone correctamente en las 12 tonalidades (triada mayor)", () => {
     // Para cada nota, la 3ª mayor debe ser 4 semitonos arriba
     NOTES.forEach((root) => {
       const chord = buildTransposedChord(root, "Maj");
-      const rootIdx = NOTES.indexOf(root);
-      const expectedThird = NOTES[(rootIdx + 4) % 12];
-      expect(chord.notes).toContain(expectedThird);
+      const rootSemitones = MusicNote.parse(root).absoluteSemitones;
+      const thirdSemitones = MusicNote.parse(chord.notes[1]).absoluteSemitones;
+      expect((thirdSemitones - rootSemitones + 12) % 12).toBe(4);
     });
   });
 });
@@ -225,6 +243,11 @@ describe("chordEngine · buildProgressionChords", () => {
     expect(names).toContain("B"); // vi de D
     expect(names).toContain("E"); // ii de D
     expect(names).toContain("A"); // V de D
+  });
+
+  it("escribe los grados diatónicos correctamente en tonalidades con sostenidos", () => {
+    const chords = buildProgressionChords("C#", "v1-1");
+    expect(chords.map((chord) => chord.root)).toEqual(["C#", "A#", "F#", "G#"]);
   });
 
   it("el I es siempre mayor, el vi es menor", () => {

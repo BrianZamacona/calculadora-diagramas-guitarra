@@ -70,17 +70,19 @@ const SHAPE_C: CagedTemplate = {
   windowStart: -3,
   windowEnd: 1,
   major: [
-    { string: 5, relativeFret: -3, interval: 0,  finger: 2 }, // raíz 6ª
-    { string: 4, relativeFret:  0, interval: 0,  finger: 3 }, // raíz 5ª (ancla)
-    { string: 3, relativeFret: -1, interval: 7,  finger: 2 }, // 5ª en 4ª cuerda
-    { string: 2, relativeFret:  0, interval: 4,  finger: 0 }, // 3M en 3ª cuerda (al aire si C)
-    { string: 1, relativeFret:  1, interval: 0,  finger: 4 }, // raíz en 2ª cuerda
-    { string: 0, relativeFret:  0, interval: 4,  finger: 0 }, // 3M en 1ª cuerda (al aire si C)
+    { string: 4, relativeFret:  0, interval: 0, finger: 3 }, // raíz 5ª (ancla)
+    { string: 3, relativeFret: -1, interval: 4, finger: 2 }, // 3M en 4ª cuerda
+    { string: 2, relativeFret: -3, interval: 7, finger: 0 }, // 5ª en 3ª cuerda
+    { string: 1, relativeFret: -2, interval: 0, finger: 1 }, // raíz en 2ª cuerda
+    { string: 0, relativeFret: -3, interval: 4, finger: 0 }, // 3M en 1ª cuerda
   ],
   minorOverrides: [
-    { string: 2, relativeFret: -1, interval: 3, finger: 1 }, // b3 en lugar de 3
+    { string: 3, relativeFret: 2, interval: 7, finger: 3 },
+    { string: 2, relativeFret: 2, interval: 0, finger: 4 },
+    { string: 1, relativeFret: 1, interval: 3, finger: 2 },
+    { string: 0, relativeFret: 0, interval: 7, finger: 1 },
   ],
-  muted: [],
+  muted: [5],
 };
 
 // ─── Forma A ──────────────────────────────────────────────────
@@ -92,15 +94,14 @@ const SHAPE_A: CagedTemplate = {
   windowStart: 0,
   windowEnd: 4,
   major: [
-    { string: 5, relativeFret: 0,  interval: 0,  finger: 0 }, // raíz 6ª (muda en cejilla)
-    { string: 4, relativeFret: 0,  interval: 0,  finger: 1 }, // raíz 5ª (ancla)
-    { string: 3, relativeFret: 2,  interval: 7,  finger: 3 }, // 5ª en 4ª
-    { string: 2, relativeFret: 2,  interval: 4,  finger: 4 }, // 3M en 3ª
-    { string: 1, relativeFret: 2,  interval: 0,  finger: 3 }, // raíz en 2ª
-    { string: 0, relativeFret: 0,  interval: 0,  finger: 0 }, // raíz 1ª (al aire A5->A)
+    { string: 4, relativeFret: 0, interval: 0, finger: 1 }, // raíz 5ª (ancla)
+    { string: 3, relativeFret: 2, interval: 7, finger: 3 }, // 5ª en 4ª
+    { string: 2, relativeFret: 2, interval: 0, finger: 4 }, // raíz en 3ª
+    { string: 1, relativeFret: 2, interval: 4, finger: 3 }, // 3M en 2ª
+    { string: 0, relativeFret: 0, interval: 7, finger: 0 }, // 5ª en 1ª
   ],
   minorOverrides: [
-    { string: 2, relativeFret: 1, interval: 3, finger: 2 }, // b3
+    { string: 1, relativeFret: 1, interval: 3, finger: 2 }, // b3 en 2ª cuerda
   ],
   barre: { relativeFret: 0, fromString: 4, toString: 0, finger: 1 },
   muted: [5],
@@ -116,16 +117,16 @@ const SHAPE_G: CagedTemplate = {
   windowStart: -3,
   windowEnd: 1,
   major: [
-    { string: 5, relativeFret:  0,  interval: 0, finger: 3 }, // raíz 6ª (ancla)
-    { string: 4, relativeFret: -2,  interval: 7, finger: 2 }, // 5ª en 5ª cuerda
-    { string: 3, relativeFret: -1,  interval: 4, finger: 1 }, // 3M en 4ª
-    { string: 2, relativeFret:  0,  interval: 0, finger: 0 }, // raíz 3ª (al aire si G)
-    { string: 1, relativeFret:  0,  interval: 4, finger: 0 }, // 3M 2ª (al aire si G) — compensación G-B
-    { string: 0, relativeFret:  0,  interval: 0, finger: 4 }, // raíz 1ª (al aire si G)
+    { string: 5, relativeFret: 0, interval: 0, finger: 1 }, // raíz 6ª (ancla)
+    { string: 4, relativeFret: 2, interval: 7, finger: 3 }, // 5ª en 5ª cuerda
+    { string: 3, relativeFret: 2, interval: 0, finger: 4 }, // raíz en 4ª cuerda
+    { string: 2, relativeFret: 1, interval: 4, finger: 2 }, // 3M en 3ª cuerda
+    { string: 1, relativeFret: 0, interval: 7, finger: 0 }, // 5ª; ajuste de afinacion G-B
+    { string: 0, relativeFret: 0, interval: 0, finger: 1 }, // raíz en 1ª cuerda
   ],
   minorOverrides: [
-    { string: 3, relativeFret: -2, interval: 3, finger: 1 }, // b3
-    { string: 1, relativeFret: -1, interval: 3, finger: 0 }, // b3 compensada G-B
+    { string: 2, relativeFret: 0, interval: 3, finger: 1 }, // b3 en 3ª cuerda
+    { string: 1, relativeFret: 0, interval: 7, finger: 0 }, // 5ª; ajuste de afinacion G-B
   ],
   muted: [],
 };
@@ -141,13 +142,13 @@ const SHAPE_E: CagedTemplate = {
   major: [
     { string: 5, relativeFret: 0, interval: 0,  finger: 1 }, // raíz 6ª (ancla)
     { string: 4, relativeFret: 2, interval: 7,  finger: 3 }, // 5ª en 5ª
-    { string: 3, relativeFret: 2, interval: 4,  finger: 4 }, // 3M en 4ª
-    { string: 2, relativeFret: 1, interval: 0,  finger: 2 }, // raíz en 3ª — compensación G-B
-    { string: 1, relativeFret: 0, interval: 0,  finger: 0 }, // raíz 2ª (al aire si E)
-    { string: 0, relativeFret: 0, interval: 0,  finger: 0 }, // raíz 1ª (al aire si E)
+    { string: 3, relativeFret: 2, interval: 0,  finger: 4 }, // raíz en 4ª
+    { string: 2, relativeFret: 1, interval: 4,  finger: 2 }, // 3M en 3ª cuerda
+    { string: 1, relativeFret: 0, interval: 7,  finger: 0 }, // 5ª en 2ª cuerda
+    { string: 0, relativeFret: 0, interval: 0,  finger: 0 }, // raíz en 1ª cuerda
   ],
   minorOverrides: [
-    { string: 3, relativeFret: 1, interval: 3, finger: 2 }, // b3
+    { string: 2, relativeFret: 0, interval: 3, finger: 1 }, // b3
   ],
   barre: { relativeFret: 0, fromString: 5, toString: 0, finger: 1 },
   muted: [],
@@ -164,12 +165,12 @@ const SHAPE_D: CagedTemplate = {
   windowEnd: 4,
   major: [
     { string: 3, relativeFret: 0, interval: 0, finger: 0 }, // raíz 4ª (ancla, al aire si D)
-    { string: 2, relativeFret: 2, interval: 4, finger: 2 }, // 3M en 3ª
-    { string: 1, relativeFret: 3, interval: 0, finger: 3 }, // raíz 2ª — compensación G-B (+1)
-    { string: 0, relativeFret: 2, interval: 7, finger: 1 }, // 5ª en 1ª
+    { string: 2, relativeFret: 2, interval: 7, finger: 2 }, // 5ª en 3ª
+    { string: 1, relativeFret: 3, interval: 0, finger: 3 }, // raíz 2ª; ajuste de afinacion G-B
+    { string: 0, relativeFret: 2, interval: 4, finger: 1 }, // 3M en 1ª
   ],
   minorOverrides: [
-    { string: 2, relativeFret: 1, interval: 3, finger: 1 }, // b3
+    { string: 0, relativeFret: 1, interval: 3, finger: 1 }, // b3
   ],
   muted: [5, 4], // cuerdas 6ª y 5ª silenciadas
 };
