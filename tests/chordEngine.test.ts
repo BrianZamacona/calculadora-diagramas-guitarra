@@ -22,7 +22,9 @@ import {
 import {
   computeAnchorFret,
   resolveCagedNotes,
+  resolveCagedShape,
   CAGED_TEMPLATES,
+  type CagedTemplate,
 } from "../src/data/cagedTemplates";
 import { NOTES, TUNING } from "../src/data/data";
 import { MusicNote } from "../src/utils/domain";
@@ -221,6 +223,49 @@ describe("chordEngine · buildCagedVoicings", () => {
     const voicings = buildCagedVoicings("A", "minor");
     const hasMinorThird = voicings.some((v) => v.notes.some((n) => n.interval === 3));
     expect(hasMinorThird).toBe(true);
+  });
+
+  const seventhQualities = [
+    { quality: "dom7", intervals: [0, 4, 7, 10] },
+    { quality: "Maj7", intervals: [0, 4, 7, 11] },
+    { quality: "min7", intervals: [0, 3, 7, 10] },
+  ] as const;
+
+  seventhQualities.forEach(({ quality, intervals }) => {
+    it(`${quality} genera notas exactas en las cinco formas`, () => {
+      const voicings = buildCagedVoicings("C", quality).filter((voicing) => voicing.anchorFret < 12);
+      for (const shape of ["C", "A", "G", "E", "D"] as const) {
+        const voicing = voicings.find((candidate) => candidate.shape === shape);
+        expect(voicing, `forma ${shape}`).toBeDefined();
+        if (!voicing) continue;
+        expect([...new Set(voicing.notes.map((note) => note.interval))].sort((a, b) => a - b)).toEqual([...intervals].sort((a, b) => a - b));
+        const expectedComplete = quality !== "min7" || shape !== "C";
+        expect(voicing.complete, `${quality} forma ${shape}`).toBe(expectedComplete);
+      }
+    });
+  });
+
+  it("marca C min7 como parcial si la forma completa sale de su ventana", () => {
+    const voicing = buildCagedVoicings("C", "min7").find((candidate) => candidate.shape === "C" && candidate.anchorFret < 12);
+    expect(voicing).toBeDefined();
+    expect(voicing?.complete).toBe(false);
+    expect(new Set(voicing?.notes.map((note) => note.interval))).toEqual(new Set([0, 3, 7, 10]));
+  });
+
+  it("devuelve un voicing parcial conservando raíz, tercera y séptima", () => {
+    const extendedTemplate: CagedTemplate = {
+      ...CAGED_TEMPLATES.E,
+      windowEnd: 8,
+      major: CAGED_TEMPLATES.E.major.map((note) => note.string === 4 ? { ...note, relativeFret: 7 } : note),
+    };
+    const resolved = resolveCagedShape(NOTES.indexOf("C"), extendedTemplate, "dom7");
+    const intervals = new Set(resolved.notes.map((note) => note.interval));
+
+    expect(resolved.complete).toBe(false);
+    expect(resolved.notes.length).toBeLessThan(extendedTemplate.major.length);
+    expect(intervals.has(0)).toBe(true);
+    expect(intervals.has(4)).toBe(true);
+    expect(intervals.has(10)).toBe(true);
   });
 });
 

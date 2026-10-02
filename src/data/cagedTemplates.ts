@@ -61,6 +61,13 @@ export interface CagedTemplate {
   muted: number[];
 }
 
+export type CagedQuality = "major" | "minor" | "dom7" | "Maj7" | "min7";
+
+export interface ResolvedCagedShape {
+  notes: Array<{ string: number; fret: number; interval: number; finger: number }>;
+  complete: boolean;
+}
+
 // ─── Forma C ──────────────────────────────────────────────────
 // Ancla: cuerda 4 (5ª A, pitch 9). Root en A-string.
 // Ejemplo: C mayor abierto (ancla en traste 3, A-string=C a traste 3)
@@ -115,7 +122,7 @@ const SHAPE_G: CagedTemplate = {
   shape: "G",
   rootString: 5,
   windowStart: -3,
-  windowEnd: 1,
+  windowEnd: 2,
   major: [
     { string: 5, relativeFret: 0, interval: 0, finger: 1 }, // raíz 6ª (ancla)
     { string: 4, relativeFret: 2, interval: 7, finger: 3 }, // 5ª en 5ª cuerda
@@ -193,32 +200,93 @@ export function computeAnchorFret(rootPitch: number, template: CagedTemplate, oc
   return ((rootPitch - openPitch + 12) % 12) + octaveShift;
 }
 
-/**
- * Devuelve las notas absolutas de la forma para una raíz y calidad dadas.
- * quality: 0 = mayor, 1 = menor.
- */
-export function resolveCagedNotes(
+/** Devuelve las notas de la forma y señala si hubo que omitir puntos. */
+export function resolveCagedShape(
   rootPitch: number,
   template: CagedTemplate,
-  quality: "major" | "minor" = "major",
+  quality: CagedQuality = "major",
   octaveShift = 0,
-): Array<{ string: number; fret: number; interval: number; finger: number }> {
+): ResolvedCagedShape {
   const anchor = computeAnchorFret(rootPitch, template, octaveShift);
-  const base = template.major.map((n) => ({ ...n }));
+  let shape = template.major.map((note) => ({ ...note }));
 
-  if (quality === "minor") {
-    template.minorOverrides.forEach((override) => {
-      const idx = base.findIndex((n) => n.string === override.string);
-      if (idx !== -1) base[idx] = { ...base[idx], ...override } as CagedNote;
-    });
+  if (quality === "minor" || quality === "min7") {
+    shape = applyOverrides(shape, template.minorOverrides);
+  }
+  if (quality === "dom7" || quality === "Maj7" || quality === "min7") {
+    const fretDrop = quality === "Maj7" ? 1 : 2;
+    const seventh = quality === "Maj7" ? 11 : 10;
+    shape = lowerRootToSeventh(shape, template, fretDrop, seventh);
   }
 
-  return base
+  const playable = selectPlayableNotes(shape, template, quality);
+  const notes = playable.notes
     .map((note) => ({
       string: note.string,
       fret: anchor + note.relativeFret,
       interval: note.interval,
       finger: note.finger,
     }))
-    .filter((n) => n.fret >= 0 && n.fret <= 24);
+    .filter((note) => note.fret >= 0 && note.fret <= 24);
+
+  return { notes, complete: playable.complete && notes.length === shape.length };
+}
+
+export function resolveCagedNotes(
+  rootPitch: number,
+  template: CagedTemplate,
+  quality: CagedQuality = "major",
+  octaveShift = 0,
+): Array<{ string: number; fret: number; interval: number; finger: number }> {
+  return resolveCagedShape(rootPitch, template, quality, octaveShift).notes;
+}
+
+function applyOverrides(notes: CagedNote[], overrides: Partial<CagedNote>[]): CagedNote[] {
+  return notes.map((note) => {
+    const override = overrides.find((candidate) => candidate.string === note.string);
+    return override ? { ...note, ...override } : note;
+  });
+}
+
+function lowerRootToSeventh(notes: CagedNote[], template: CagedTemplate, fretDrop: number, interval: number): CagedNote[] {
+  const rootToLower = notes
+    .filter((note) => note.interval === 0 && note.relativeFret - fretDrop >= template.windowStart)
+    .sort((left, right) => right.relativeFret - left.relativeFret || left.string - right.string)[0];
+  if (!rootToLower) return notes;
+  return notes.map((note) => note === rootToLower
+    ? { ...note, relativeFret: note.relativeFret - fretDrop, interval }
+    : note);
+}
+
+function requiredIntervals(quality: CagedQuality): number[] {
+  if (quality === "dom7") return [0, 4, 10];
+  if (quality === "Maj7") return [0, 4, 11];
+  if (quality === "min7") return [0, 3, 10];
+  return quality === "minor" ? [0, 3] : [0, 4];
+}
+
+function isPlayableShape(notes: readonly CagedNote[], template: CagedTemplate): boolean {
+  if (notes.length === 0) return false;
+  const relativeFrets = notes.map((note) => note.relativeFret);
+  const fretSpan = Math.max(...relativeFrets) - Math.min(...relativeFrets);
+  const fingers = new Set(notes.map((note) => note.finger).filter((finger) => finger > 0));
+  return fretSpan <= 4
+    && fingers.size <= 4
+    && notes.every((note) => note.relativeFret >= template.windowStart && note.relativeFret <= template.windowEnd);
+}
+
+function selectPlayableNotes(notes: CagedNote[], template: CagedTemplate, quality: CagedQuality): { notes: CagedNote[]; complete: boolean } {
+  if (isPlayableShape(notes, template)) return { notes, complete: true };
+  const required = requiredIntervals(quality);
+
+  for (let retainedCount = notes.length - 1; retainedCount >= required.length; retainedCount -= 1) {
+    for (let mask = 1; mask < 1 << notes.length; mask += 1) {
+      const candidate = notes.filter((_, index) => (mask & (1 << index)) !== 0);
+      if (candidate.length !== retainedCount) continue;
+      if (!required.every((interval) => candidate.some((note) => note.interval === interval))) continue;
+      if (isPlayableShape(candidate, template)) return { notes: candidate, complete: false };
+    }
+  }
+
+  return { notes: [], complete: false };
 }

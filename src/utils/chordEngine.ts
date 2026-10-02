@@ -14,7 +14,7 @@
 
 import { NOTES, type Note } from "../data/data";
 import { addInterval, MusicNote } from "./domain";
-import { CAGED_TEMPLATES, computeAnchorFret, resolveCagedNotes, type CagedTemplate } from "../data/cagedTemplates";
+import { CAGED_TEMPLATES, computeAnchorFret, resolveCagedShape, type CagedQuality, type CagedTemplate } from "../data/cagedTemplates";
 
 // ─── Tipos base ────────────────────────────────────────────────
 
@@ -228,6 +228,7 @@ export interface CagedPositionVoicing {
   shape: CagedShapeId;
   anchorFret: number;
   notes: Array<{ string: number; fret: number; interval: number; finger: number }>;
+  complete: boolean;
   mutedStrings: number[];
   barre?: { fret: number; fromString: number; toString: number };
 }
@@ -238,7 +239,7 @@ export interface CagedPositionVoicing {
  */
 export function buildCagedVoicings(
   root: string,
-  quality: "major" | "minor" = "major",
+  quality: CagedQuality = "major",
 ): CagedPositionVoicing[] {
   const rootSemitones = MusicNote.parse(root).absoluteSemitones;
   const rootPitch = ((rootSemitones % 12) + 12) % 12;
@@ -250,12 +251,12 @@ export function buildCagedVoicings(
     for (const octaveShift of [0, 12]) {
       const anchor = computeAnchorFret(rootPitch, template, octaveShift);
       if (anchor < 0 || anchor > 20) continue;
-      const notes = resolveCagedNotes(rootPitch, template, quality, octaveShift);
-      if (notes.length === 0) continue;
+      const resolved = resolveCagedShape(rootPitch, template, quality, octaveShift);
+      if (resolved.notes.length === 0) continue;
       const barre = template.barre
         ? { fret: anchor + template.barre.relativeFret, fromString: template.barre.fromString, toString: template.barre.toString }
         : undefined;
-      result.push({ shape: shapeId, anchorFret: anchor, notes, mutedStrings: [...template.muted], barre });
+      result.push({ shape: shapeId, anchorFret: anchor, notes: resolved.notes, complete: resolved.complete, mutedStrings: [...template.muted], barre });
     }
   }
 
