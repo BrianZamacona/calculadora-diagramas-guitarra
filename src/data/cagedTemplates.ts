@@ -75,7 +75,7 @@ const SHAPE_C: CagedTemplate = {
   shape: "C",
   rootString: 4,   // 5ª cuerda A
   windowStart: -3,
-  windowEnd: 1,
+  windowEnd: 2,
   major: [
     { string: 4, relativeFret:  0, interval: 0, finger: 3 }, // raíz 5ª (ancla)
     { string: 3, relativeFret: -1, interval: 4, finger: 2 }, // 3M en 4ª cuerda
@@ -219,7 +219,7 @@ export function resolveCagedShape(
     shape = lowerRootToSeventh(shape, template, fretDrop, seventh);
   }
 
-  const playable = selectPlayableNotes(shape, template, quality);
+  const playable = selectPlayableNotes(shape, template, quality, anchor);
   const notes = playable.notes
     .map((note) => ({
       string: note.string,
@@ -265,18 +265,21 @@ function requiredIntervals(quality: CagedQuality): number[] {
   return quality === "minor" ? [0, 3] : [0, 4];
 }
 
-function isPlayableShape(notes: readonly CagedNote[], template: CagedTemplate): boolean {
+function isPlayableShape(notes: readonly CagedNote[], template: CagedTemplate, anchor: number): boolean {
   if (notes.length === 0) return false;
   const relativeFrets = notes.map((note) => note.relativeFret);
   const fretSpan = Math.max(...relativeFrets) - Math.min(...relativeFrets);
   const fingers = new Set(notes.map((note) => note.finger).filter((finger) => finger > 0));
   return fretSpan <= 4
     && fingers.size <= 4
-    && notes.every((note) => note.relativeFret >= template.windowStart && note.relativeFret <= template.windowEnd);
+    && notes.every((note) => note.relativeFret >= template.windowStart
+      && note.relativeFret <= template.windowEnd
+      && anchor + note.relativeFret >= 0
+      && anchor + note.relativeFret <= 24);
 }
 
-function selectPlayableNotes(notes: CagedNote[], template: CagedTemplate, quality: CagedQuality): { notes: CagedNote[]; complete: boolean } {
-  if (isPlayableShape(notes, template)) return { notes, complete: true };
+function selectPlayableNotes(notes: CagedNote[], template: CagedTemplate, quality: CagedQuality, anchor: number): { notes: CagedNote[]; complete: boolean } {
+  if (isPlayableShape(notes, template, anchor)) return { notes, complete: true };
   const required = requiredIntervals(quality);
 
   for (let retainedCount = notes.length - 1; retainedCount >= required.length; retainedCount -= 1) {
@@ -284,7 +287,7 @@ function selectPlayableNotes(notes: CagedNote[], template: CagedTemplate, qualit
       const candidate = notes.filter((_, index) => (mask & (1 << index)) !== 0);
       if (candidate.length !== retainedCount) continue;
       if (!required.every((interval) => candidate.some((note) => note.interval === interval))) continue;
-      if (isPlayableShape(candidate, template)) return { notes: candidate, complete: false };
+      if (isPlayableShape(candidate, template, anchor)) return { notes: candidate, complete: false };
     }
   }
 

@@ -239,17 +239,18 @@ describe("chordEngine · buildCagedVoicings", () => {
         expect(voicing, `forma ${shape}`).toBeDefined();
         if (!voicing) continue;
         expect([...new Set(voicing.notes.map((note) => note.interval))].sort((a, b) => a - b)).toEqual([...intervals].sort((a, b) => a - b));
-        const expectedComplete = quality !== "min7" || shape !== "C";
-        expect(voicing.complete, `${quality} forma ${shape}`).toBe(expectedComplete);
+        expect(voicing.complete, `${quality} forma ${shape}`).toBe(true);
       }
     });
   });
 
-  it("marca C min7 como parcial si la forma completa sale de su ventana", () => {
+  it("resuelve C min7 completo con sus cinco notas en la forma C", () => {
     const voicing = buildCagedVoicings("C", "min7").find((candidate) => candidate.shape === "C" && candidate.anchorFret < 12);
     expect(voicing).toBeDefined();
-    expect(voicing?.complete).toBe(false);
-    expect(new Set(voicing?.notes.map((note) => note.interval))).toEqual(new Set([0, 3, 7, 10]));
+    expect(voicing?.complete).toBe(true);
+    expect(voicing?.notes).toHaveLength(5);
+    // Pitch-class labels use sharps: A# and D# are Bb and Eb enharmonically.
+    expect(voicing?.notes.map((note) => NOTES[(TUNING[note.string] + note.fret) % 12])).toEqual(["C", "G", "A#", "D#", "G"]);
   });
 
   it("devuelve un voicing parcial conservando raíz, tercera y séptima", () => {
@@ -266,6 +267,25 @@ describe("chordEngine · buildCagedVoicings", () => {
     expect(intervals.has(0)).toBe(true);
     expect(intervals.has(4)).toBe(true);
     expect(intervals.has(10)).toBe(true);
+  });
+
+  it("marca solo los voicings recortados por el traste cero como parciales", () => {
+    const qualities = ["major", "minor", "dom7", "Maj7", "min7"] as const;
+    const incomplete = NOTES.flatMap((root) => Object.values(CAGED_TEMPLATES).flatMap((template) => qualities.flatMap((quality) => {
+      const resolved = resolveCagedShape(NOTES.indexOf(root), template, quality);
+      return resolved.complete ? [] : [{ root, shape: template.shape, quality, intervals: resolved.notes.map((note) => note.interval) }];
+    })));
+    expect(incomplete).toEqual([
+      { root: "A", shape: "C", quality: "major", intervals: [] },
+      { root: "A", shape: "C", quality: "dom7", intervals: [] },
+      { root: "A", shape: "C", quality: "Maj7", intervals: [] },
+      { root: "A#", shape: "C", quality: "major", intervals: [0, 4] },
+      { root: "A#", shape: "C", quality: "dom7", intervals: [] },
+      { root: "A#", shape: "C", quality: "Maj7", intervals: [] },
+      { root: "B", shape: "C", quality: "major", intervals: [0, 4, 0] },
+      { root: "B", shape: "C", quality: "dom7", intervals: [10, 4, 0] },
+      { root: "B", shape: "C", quality: "Maj7", intervals: [11, 4, 0] },
+    ]);
   });
 });
 
