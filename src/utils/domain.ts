@@ -30,7 +30,7 @@ export interface BuiltChord {
 }
 export interface ChordVoicing {
   title: string;
-  fretPositions: readonly (number | -1)[];
+  fretPositions: readonly number[];
   fingerPositions: readonly number[];
   baseFret: number;
   position: "abierta" | "cejilla" | "movible";
@@ -73,68 +73,108 @@ const INTERVAL_TO_STEPS: Record<number, number> = {
   11: 6,  // 7ma mayor (7M)
 };
 
-export function buildChord(state: ChordBuilderState): BuiltChord {
-  const rootIndex = noteIndex(state.root);
-  if (rootIndex < 0) return { name: "", notes: [], intervals: [] };
-
+function chordIntervals(state: ChordBuilderState): number[] {
   const intervals = [...BASE_INTERVALS[state.base]];
   if (state.fifth !== "none") intervals[intervals.length - 1] = FIFTH_INTERVALS[state.fifth];
   if (state.seventh !== "none") intervals.push(SEVENTH_INTERVALS[state.seventh]);
-
   state.extensions
     .filter((extension) => extension !== "none")
     .forEach((extension) => intervals.push(EXTENSION_INTERVALS[extension]));
-
   state.additions.forEach((addition) => intervals.push(ADDITION_INTERVALS[addition]));
+  return uniqueIntervals(intervals);
+}
 
-  const normalizedIntervals = uniqueIntervals(intervals);
-
-  // ✅ REEMPLAZO CORE: Instanciar la nota raíz usando MusicNote y calcular cada nota diatónicamente
+function chordNotes(state: ChordBuilderState, intervals: readonly number[]): Note[] {
   const rootNote = MusicNote.parse(state.root);
-  const notes = normalizedIntervals.map((semitones) => {
-    // Para 5ta disminuida (6 semitonos en b5) asignamos 4 pasos (grado 5)
+  return intervals.map((semitones) => {
     let steps = INTERVAL_TO_STEPS[semitones] ?? 0;
     if (semitones === 6 && state.fifth === "b5") steps = 4;
-
-    const targetNote = addInterval(rootNote, { steps, semitones });
-    return targetNote.toString() as Note;
+    return addInterval(rootNote, { steps, semitones }).toString() as Note;
   });
+}
 
-  const bass = state.bass && state.bass !== "none" && noteIndex(state.bass) >= 0 ? (state.bass as Note) : undefined;
+function chordBass(state: ChordBuilderState): Note | undefined {
+  if (!state.bass || state.bass === "none" || noteIndex(state.bass) < 0) return undefined;
+  return state.bass as Note;
+}
 
-  const hasMinorThird = normalizedIntervals.includes(3);
-  const hasMajorThird = normalizedIntervals.includes(4);
-  const hasFlatSeven = normalizedIntervals.includes(10);
-  const isDominantNinth = state.seventh === "7" && state.extensions.includes("9") && state.base === "major" && hasMajorThird && hasFlatSeven;
-  const isMajorNinth = state.seventh === "7M" && state.extensions.includes("9") && state.base === "major";
-
-  let suffix = state.base === "minor" ? "m" : state.base === "sus2" ? "sus2" : state.base === "sus4" ? "sus4" : state.base === "aug" ? "aug" : state.base === "dim" ? "dim" : "";
+function chordQualitySuffix(state: ChordBuilderState, intervals: readonly number[]): string {
+  const baseSuffix: Record<ChordBase, string> = {
+    major: "", minor: "m", sus2: "sus2", sus4: "sus4", aug: "aug", dim: "dim",
+  };
+  const isDominantNinth = state.seventh === "7"
+    && state.extensions.includes("9")
+    && state.base === "major"
+    && intervals.includes(4)
+    && intervals.includes(10);
+  const isMajorNinth = state.seventh === "7M"
+    && state.extensions.includes("9")
+    && state.base === "major";
+  let suffix = baseSuffix[state.base];
 
   if (isDominantNinth) suffix = "9";
   else if (isMajorNinth) suffix = "maj9";
-  else if (state.seventh === "7M") suffix += "maj7";
-  else if (state.seventh === "7") suffix += "7";
-  else if (state.seventh === "6") suffix += "6";
+  else suffix = appendSeventhSuffix(suffix, state.seventh);
 
+  return suffix;
+}
+
+function appendSeventhSuffix(suffix: string, seventh: SeventhModifier): string {
+  if (seventh === "7M") return `${suffix}maj7`;
+  if (seventh === "7") return `${suffix}7`;
+  if (seventh === "6") return `${suffix}6`;
+  return suffix;
+}
+
+function appendAlterationSuffix(suffix: string, state: ChordBuilderState): string {
   if (state.fifth === "b5" && state.base !== "dim") suffix += "b5";
   if (state.fifth === "#5" && state.base !== "aug") suffix += "#5";
+  return suffix;
+}
 
+function appendExtensionSuffix(suffix: string, state: ChordBuilderState): string {
+  const ninthAlreadyIncluded = state.base === "major"
+    && state.extensions.includes("9")
+    && (state.seventh === "7" || state.seventh === "7M");
   state.extensions
     .filter((extension) => extension !== "none")
     .forEach((extension) => {
-      if (!(isDominantNinth && extension === "9") && !(isMajorNinth && extension === "9")) suffix += extensionLabel(extension);
+      if (!(ninthAlreadyIncluded && extension === "9")) suffix += extensionLabel(extension);
     });
+  return suffix;
+}
 
-  state.additions.forEach((addition) => {
+function appendAdditionSuffix(suffix: string, additions: readonly AdditionModifier[]): string {
+  additions.forEach((addition) => {
     if (!suffix.includes(addition)) suffix += addition;
   });
+  return suffix;
+}
 
-  if (state.base === "major" && state.fifth === "5" && state.seventh === "none" && state.extensions.length === 0 && state.additions.length === 0 && !hasMinorThird) {
-    suffix = "";
-  }
+function chordName(state: ChordBuilderState, bass: Note | undefined, intervals: readonly number[]): string {
+  let suffix = chordQualitySuffix(state, intervals);
+  suffix = appendAlterationSuffix(suffix, state);
+  suffix = appendExtensionSuffix(suffix, state);
+  suffix = appendAdditionSuffix(suffix, state.additions);
 
-  const name = `${state.root}${suffix}${bass ? `/${bass}` : ""}`;
-  return { name, notes, intervals: normalizedIntervals, bass };
+  const isPlainMajor = state.base === "major"
+    && state.fifth === "5"
+    && state.seventh === "none"
+    && state.extensions.length === 0
+    && state.additions.length === 0
+    && !intervals.includes(3);
+  if (isPlainMajor) suffix = "";
+
+  const chordRootAndQuality = state.root + suffix;
+  return bass ? chordRootAndQuality + "/" + bass : chordRootAndQuality;
+}
+
+export function buildChord(state: ChordBuilderState): BuiltChord {
+  if (noteIndex(state.root) < 0) return { name: "", notes: [], intervals: [] };
+  const intervals = chordIntervals(state);
+  const notes = chordNotes(state, intervals);
+  const bass = chordBass(state);
+  return { name: chordName(state, bass, intervals), notes, intervals, bass };
 }
 
 const MAX_VOICING_FRET = 12;
@@ -145,7 +185,7 @@ const MAX_VOICING_RESULTS = 12;
 const MAX_RAW_VOICINGS = 300;
 
 interface RawVoicing {
-  frets: (number | -1)[];
+  frets: number[];
   coverage: number;
   soundingStrings: number;
   baseFret: number;
@@ -162,7 +202,7 @@ function searchVoicings(rootIndex: number, mustHave: readonly number[], niceToHa
   const allowed = new Set<number>([...must, ...nice]);
   const results: RawVoicing[] = [];
   if (must.size > 6) return results;
-  const frets: (number | -1)[] = [-1, -1, -1, -1, -1, -1];
+  const frets: number[] = [-1, -1, -1, -1, -1, -1];
 
   const finalize = (soundingStrings: number, covered: Set<number>): void => {
     if (soundingStrings < MIN_SOUNDING_STRINGS) return;
@@ -223,14 +263,21 @@ function toVoicing(raw: RawVoicing): ChordVoicing {
   let barre: ChordVoicing["barre"];
   if (distinctFrets.length > 0) {
     const lowestFret = distinctFrets[0];
-    const soundingIndices = frets.reduce<number[]>((acc, fret, index) => { if (fret !== -1) acc.push(index); return acc; }, []);
+    const soundingIndices = frets.reduce<number[]>((acc, fret, index) => {
+      if (fret !== -1) acc.push(index);
+      return acc;
+    }, []);
     const atLowestCount = frets.filter((fret) => fret === lowestFret).length;
-    if (atLowestCount >= 2 && soundingIndices.length > 0) barre = { fret: lowestFret, fromString: soundingIndices[0], toString: soundingIndices[soundingIndices.length - 1] };
+    if (atLowestCount >= 2 && soundingIndices.length > 0) barre = { fret: lowestFret, fromString: soundingIndices[0], toString: soundingIndices.at(-1)! };
   }
   let rootStringIndex = 0;
   for (let index = 5; index >= 0; index -= 1) { if (frets[index] !== -1) { rootStringIndex = index; break; } }
-  const position: ChordVoicing["position"] = raw.baseFret === 0 ? "abierta" : barre ? "cejilla" : "movible";
-  const title = position === "abierta" ? "Posición abierta" : position === "cejilla" ? `Cejilla (${rootStringIndex + 1}ª cuerda) · traste ${raw.baseFret}` : `Posición · traste ${raw.baseFret}`;
+  let position: ChordVoicing["position"] = "movible";
+  if (raw.baseFret === 0) position = "abierta";
+  else if (barre) position = "cejilla";
+  let title = `Posición · traste ${raw.baseFret}`;
+  if (position === "abierta") title = "Posición abierta";
+  else if (position === "cejilla") title = `Cejilla (${rootStringIndex + 1}ª cuerda) · traste ${raw.baseFret}`;
   return { title, fretPositions: frets, fingerPositions, baseFret: raw.baseFret, position, barre };
 }
 
@@ -301,7 +348,8 @@ export function suggestNoteSets(selectedNotes: readonly string[]): NoteSetSugges
     const extra = [...selected].filter((note) => !candidateSet.has(note)).length;
     suggestions.push({ kind: candidate.kind, name: candidate.name, root, exact: missing === 0 && extra === 0, matched, missing, extra });
   }));
-  return suggestions.sort((left, right) => Number(right.exact) - Number(left.exact) || (right.matched - right.missing - right.extra) - (left.matched - left.missing - left.extra)).slice(0, 12);
+  suggestions.sort((left, right) => Number(right.exact) - Number(left.exact) || (right.matched - right.missing - right.extra) - (left.matched - left.missing - left.extra));
+  return suggestions.slice(0, 12);
 }
 
 export function noteIndex(note: string): number { return NOTES.indexOf(note as Note); }
@@ -350,8 +398,10 @@ export function findDoubleStops(root: string, distance: number, range: Range): F
           const companionDistance = (TUNING[companionString] + companionFret - rootIndex + 24) % 12;
           if (companionDistance !== distance) continue;
           if (Math.abs(companionFret - fret) > 4 && fret !== 0 && companionFret !== 0) continue;
-          marks.push({ stringIndex: baseString, fret, note: noteAt(baseString, fret), interval: intervalLabel(baseDistance), kind: "root" });
-          marks.push({ stringIndex: companionString, fret: companionFret, note: noteAt(companionString, companionFret), interval: intervalLabel(companionDistance), kind: "chord" });
+          marks.push(
+            { stringIndex: baseString, fret, note: noteAt(baseString, fret), interval: intervalLabel(baseDistance), kind: "root" },
+            { stringIndex: companionString, fret: companionFret, note: noteAt(companionString, companionFret), interval: intervalLabel(companionDistance), kind: "chord" },
+          );
         }
       });
     }
@@ -384,7 +434,9 @@ export function findScaleMarks(root: string, intervals: readonly number[], syste
   const position = Number(system.split("-")[1]) || 0;
   const rootIndex = noteIndex(root);
   const anchor = (rootIndex - TUNING[5] + 12) % 12;
-  const width = system.startsWith("4nps") ? 6 : system.startsWith("3nps") ? 5 : 4;
+  let width = 4;
+  if (system.startsWith("4nps")) width = 6;
+  else if (system.startsWith("3nps")) width = 5;
   const start = anchor + ((position * 2) % 12);
   return marks.filter((mark) => mark.fret >= start && mark.fret <= start + width);
 }
@@ -481,12 +533,12 @@ export class MusicNote {
   }
 
   static parse(str: string, defaultOctave = 4): MusicNote {
-    const match = str.trim().match(/^([A-G])(bb|b|##|#)?(-?\d+)?$/);
+    const match = /^([A-G])(bb|b|##|#)?(-?\d+)?$/.exec(str.trim());
     if (!match) throw new Error(`Nota inválida: ${str}`);
     return new MusicNote(
       match[1] as Letter,
       (match[2] || '') as Accidental,
-      match[3] !== undefined ? parseInt(match[3], 10) : defaultOctave
+      match[3] !== undefined ? Number.parseInt(match[3], 10) : defaultOctave
     );
   }
 

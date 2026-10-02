@@ -268,7 +268,7 @@ describe("chordEngine · buildProgressionChords", () => {
   it("genera progresiones en las 12 tonalidades para Vol.3", () => {
     NOTES.forEach((root) => {
       const chords = buildProgressionChords(root, "v3-1");
-      expect(chords.length).toBe(4); // I-V-vi-iii
+      expect(chords).toHaveLength(4); // I-V-vi-iii
     });
   });
 });
@@ -323,7 +323,7 @@ describe("chordEngine · CHORD_QUALITIES e intervalos", () => {
 describe("chordEngine · progressionNotes", () => {
   it("retorna objetos con chord y degree", () => {
     const notes = progressionNotes("C", "v1-1");
-    expect(notes.length).toBe(4);
+    expect(notes).toHaveLength(4);
     notes.forEach((n) => {
       expect(n.chord).toBeDefined();
       expect(n.degree).toBeDefined();

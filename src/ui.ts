@@ -1,5 +1,5 @@
 import { ARPEGGIOS, CHORD_CATEGORIES, CHORD_GLOSSARY, CAGED_QUALITIES, CAGED_SHAPES, FRET_COUNT, NOTES, SCALES, STRINGS, type ArpeggioId, type CagedLayer, type CagedQuality, type CagedShape, type ChordGlossaryEntry, type ModuleId, type ScaleId } from "./data/data";
-import { buildChord, clampRange, findChordVoicings, findCagedBoxes, findCagedLayerMarks, findDoubleStops, findMarks, findScaleMarks, findVoicingMarks, findVoicingsForIntervals, noteAt, suggestNoteSets, type ChordBase, type ChordBuilderState, type ChordVoicing, type CagedWindow, type FretMark, type Range, type ScaleSystem } from "./utils/domain";
+import { buildChord, clampRange, findChordVoicings, findCagedBoxes, findCagedLayerMarks, findDoubleStops, findMarks, findScaleMarks, findVoicingMarks, findVoicingsForIntervals, noteAt, suggestNoteSets, type ChordBase, type ChordBuilderState, type ChordVoicing, type CagedWindow, type FretMark, type NoteSetSuggestion, type Range, type ScaleSystem } from "./utils/domain";
 import { mountCagedModule } from "./cagedModule";
 
 type DisplayMode = "notes" | "intervals" | "both";
@@ -35,15 +35,17 @@ function isPentatonicOrBlues(scale: ScaleId): boolean {
   return scale.includes("pent") || scale.includes("blues");
 }
 function scaleSystemOptions(scale: ScaleId): Array<[string, string]> {
-  const options: Array<[string, string]> = [["all", "Mástil completo"]];
-  if (isPentatonicOrBlues(scale)) {
-    options.push(...Array.from({ length: 5 }, (_, index) => [`block-${index}`, `Posición ${index + 1}`] as [string, string]));
-  } else {
-    options.push(...Array.from({ length: 5 }, (_, index) => [`block-${index}`, `Bloque ${index + 1}`] as [string, string]));
-    options.push(...Array.from({ length: 7 }, (_, index) => [`3nps-${index}`, `3NPS ${index + 1}`] as [string, string]));
-    options.push(...Array.from({ length: 7 }, (_, index) => [`4nps-${index}`, `4NPS ${index + 1}`] as [string, string]));
-  }
-  return options;
+  const blocks = Array.from({ length: 5 }, (_, index) => [
+    `block-${index}`,
+    `${isPentatonicOrBlues(scale) ? "Posición" : "Bloque"} ${index + 1}`,
+  ] as [string, string]);
+  const extended = isPentatonicOrBlues(scale)
+    ? []
+    : [
+        ...Array.from({ length: 7 }, (_, index) => [`3nps-${index}`, `3NPS ${index + 1}`] as [string, string]),
+        ...Array.from({ length: 7 }, (_, index) => [`4nps-${index}`, `4NPS ${index + 1}`] as [string, string]),
+      ];
+  return [["all", "Mástil completo"], ...blocks, ...extended];
 }
 function rangeControls(state: State): HTMLElement {
   const wrapper = el("div", "range"); const start = el("input"); start.type = "number"; start.min = "0"; start.max = String(FRET_COUNT - 3); start.value = String(state.start); start.dataset.range = "start";
@@ -167,19 +169,103 @@ function chordCatalogView(state: State, onChange: () => void): HTMLElement {
   section.append(grid);
   return section;
 }
+function searchActions(state: State, onChange: () => void): HTMLElement {
+  const actions = el("div", "search-actions");
+  const all = el("button", "search-action");
+  all.type = "button";
+  all.textContent = "Todas las notas";
+  all.addEventListener("click", () => { state.searchNotes = [...NOTES]; onChange(); });
+  const clear = el("button", "search-action");
+  clear.type = "button";
+  clear.textContent = "Limpiar diapasón";
+  clear.addEventListener("click", () => { state.searchNotes = []; onChange(); });
+  actions.append(all, clear);
+  return actions;
+}
+function searchNoteButton(state: State, selected: ReadonlySet<string>, stringIndex: number, fret: number, onChange: () => void): HTMLButtonElement {
+  const note = noteAt(stringIndex, fret);
+  const isSelected = selected.has(note);
+  const button = el("button", `search-fret ${isSelected ? "selected" : ""}`);
+  button.type = "button";
+  button.title = `${note}, cuerda ${STRINGS[stringIndex]}, traste ${fret}`;
+  button.setAttribute("aria-label", button.title);
+  button.addEventListener("click", () => {
+    state.searchNotes = isSelected
+      ? state.searchNotes.filter((candidate) => candidate !== note)
+      : [...state.searchNotes, note];
+    onChange();
+  });
+  const label = el("span");
+  label.textContent = isSelected ? note : "";
+  button.append(label);
+  return button;
+}
+function searchFretboard(state: State, onChange: () => void): HTMLElement {
+  const selected = new Set(state.searchNotes);
+  const boardElement = el("div", "search-fretboard");
+  for (let fret = 0; fret <= 24; fret += 1) {
+    const number = el("span", "search-fret-number");
+    number.textContent = String(fret);
+    boardElement.append(number);
+  }
+  for (let stringIndex = 0; stringIndex < STRINGS.length; stringIndex += 1) {
+    for (let fret = 0; fret <= 24; fret += 1) {
+      boardElement.append(searchNoteButton(state, selected, stringIndex, fret, onChange));
+    }
+  }
+  return boardElement;
+}
+function searchCountLabel(count: number): HTMLElement {
+  const label = el("p", "search-count");
+  if (count === 12) {
+    label.textContent = "12 notas seleccionadas · escala cromática";
+    return label;
+  }
+  const noteWord = count === 1 ? "nota" : "notas";
+  const selectedWord = count === 1 ? "seleccionada" : "seleccionadas";
+  label.textContent = `${count} ${noteWord} ${selectedWord}`;
+  return label;
+}
+function suggestionCard(suggestion: NoteSetSuggestion): HTMLElement {
+  const card = el("article", `suggestion ${suggestion.exact ? "exact" : "near"}`);
+  const name = el("strong");
+  name.textContent = `${suggestion.root} ${suggestion.name}`;
+  const detail = el("span");
+  detail.textContent = suggestion.exact
+    ? "Coincidencia exacta"
+    : `${suggestion.matched} coinciden · faltan ${suggestion.missing} · sobran ${suggestion.extra}`;
+  card.append(name, detail);
+  return card;
+}
+function searchSuggestions(state: State): HTMLElement {
+  const suggestions = el("div", "suggestions-grid");
+  if (state.searchNotes.length === 12) {
+    const chromatic = el("article", "suggestion exact");
+    chromatic.textContent = "Escala cromática · cualquier raíz";
+    suggestions.append(chromatic);
+  } else {
+    suggestNoteSets(state.searchNotes).forEach((suggestion) => suggestions.append(suggestionCard(suggestion)));
+  }
+  if (state.searchNotes.length === 0) {
+    const empty = el("p", "empty-state");
+    empty.textContent = "Selecciona una o más notas en el diapasón.";
+    suggestions.append(empty);
+  }
+  return suggestions;
+}
 function searchView(state: State, onChange: () => void): HTMLElement {
   const section = el("section", "catalog-view search-view");
-  const intro = el("div", "section-intro"); const title = el("h2"); title.textContent = "Buscador en el diapasón"; const copy = el("p"); copy.textContent = "Selecciona notas directamente en el mástil y descubre escalas, acordes y arpegios compatibles."; intro.append(title, copy); section.append(intro);
-  const actions = el("div", "search-actions"); const all = el("button", "search-action"); all.type = "button"; all.textContent = "Todas las notas"; all.addEventListener("click", () => { state.searchNotes = [...NOTES]; onChange(); }); const clear = el("button", "search-action"); clear.type = "button"; clear.textContent = "Limpiar diapasón"; clear.addEventListener("click", () => { state.searchNotes = []; onChange(); }); actions.append(all, clear); section.append(actions);
-  const selected = new Set(state.searchNotes); const boardElement = el("div", "search-fretboard");
-  for (let fret = 0; fret <= 24; fret += 1) { const number = el("span", "search-fret-number"); number.textContent = String(fret); boardElement.append(number); }
-  for (let stringIndex = 0; stringIndex < STRINGS.length; stringIndex += 1) for (let fret = 0; fret <= 24; fret += 1) { const note = noteAt(stringIndex, fret); const button = el("button", `search-fret ${selected.has(note) ? "selected" : ""}`); button.type = "button"; button.title = `${note}, cuerda ${STRINGS[stringIndex]}, traste ${fret}`; button.setAttribute("aria-label", button.title); button.addEventListener("click", () => { state.searchNotes = selected.has(note) ? state.searchNotes.filter((candidate) => candidate !== note) : [...state.searchNotes, note]; onChange(); }); const label = el("span"); label.textContent = selected.has(note) ? note : ""; button.append(label); boardElement.append(button); }
-  section.append(boardElement);
-  const selectedLabel = el("p", "search-count"); selectedLabel.textContent = state.searchNotes.length === 12 ? "12 notas seleccionadas · escala cromática" : `${state.searchNotes.length} nota${state.searchNotes.length === 1 ? "" : "s"} seleccionada${state.searchNotes.length === 1 ? "" : "s"}`; section.append(selectedLabel);
-  const suggestionTitle = el("h3", "suggestions-title"); suggestionTitle.textContent = "Sugerencias"; section.append(suggestionTitle);
-  const suggestions = el("div", "suggestions-grid"); if (state.searchNotes.length === 12) { const chromatic = el("article", "suggestion exact"); chromatic.textContent = "Escala cromática · cualquier raíz"; suggestions.append(chromatic); } else suggestNoteSets(state.searchNotes).forEach((suggestion) => { const card = el("article", `suggestion ${suggestion.exact ? "exact" : "near"}`); const name = el("strong"); name.textContent = `${suggestion.root} ${suggestion.name}`; const detail = el("span"); detail.textContent = suggestion.exact ? "Coincidencia exacta" : `${suggestion.matched} coinciden · faltan ${suggestion.missing} · sobran ${suggestion.extra}`; card.append(name, detail); suggestions.append(card); });
-  if (state.searchNotes.length === 0) { const empty = el("p", "empty-state"); empty.textContent = "Selecciona una o más notas en el diapasón."; suggestions.append(empty); }
-  section.append(suggestions); return section;
+  const intro = el("div", "section-intro");
+  const title = el("h2");
+  title.textContent = "Buscador en el diapasón";
+  const copy = el("p");
+  copy.textContent = "Selecciona notas directamente en el mástil y descubre escalas, acordes y arpegios compatibles.";
+  intro.append(title, copy);
+  section.append(intro, searchActions(state, onChange), searchFretboard(state, onChange), searchCountLabel(state.searchNotes.length));
+  const suggestionTitle = el("h3", "suggestions-title");
+  suggestionTitle.textContent = "Sugerencias";
+  section.append(suggestionTitle, searchSuggestions(state));
+  return section;
 }
 function checkboxGroup(labelText: string, values: readonly string[], selected: readonly string[], onChange: (values: string[]) => void): HTMLElement {
   const group = el("fieldset", "checkbox-group"); const legend = el("legend"); legend.textContent = labelText; group.append(legend);
@@ -193,9 +279,9 @@ function choiceGroup(labelText: string, values: readonly [string, string][], sel
 }
 function fingeringDiagram(fingering: ChordVoicing, root: string): HTMLElement {
   const card = el("article", "chord-diagram-card"); const title = el("h3"); title.textContent = fingering.title; card.append(title);
-  const frets = fingering.fretPositions; const fretted = frets.filter((fret) => fret > 0); const maxFret = fretted.length > 0 ? Math.max(...fretted) : 1; const minFret = fingering.baseFret > 1 ? fingering.baseFret : 1;
+  const frets = fingering.fretPositions; const fretted = frets.filter((fret) => fret > 0); const maxFret = Math.max(1, ...fretted); const minFret = Math.max(1, fingering.baseFret);
   const diagram = el("div", "fingering-diagram"); diagram.style.gridTemplateColumns = "repeat(6, 34px)";
-  [5, 4, 3, 2, 1, 0].forEach((stringIndex) => { const fret = frets[stringIndex]; const marker = el("span", "fingering-open"); marker.textContent = fret === -1 ? "x" : fret === 0 ? "o" : ""; diagram.append(marker); });
+  [5, 4, 3, 2, 1, 0].forEach((stringIndex) => { const fret = frets[stringIndex]; const marker = el("span", "fingering-open"); marker.textContent = fretMarkerText(fret); diagram.append(marker); });
   if (fingering.barre) {
     const rowIndex = fingering.barre.fret - minFret;
     if (rowIndex >= 0) {
@@ -210,6 +296,16 @@ function fingeringDiagram(fingering: ChordVoicing, root: string): HTMLElement {
   }
   for (let fret = minFret; fret <= Math.max(minFret + 3, maxFret); fret += 1) { [5, 4, 3, 2, 1, 0].forEach((stringIndex) => { const cell = el("div", "fingering-cell"); if (frets[stringIndex] === fret) { const dot = el("span", `diagram-note ${noteAt(stringIndex, fret) === root ? "root" : ""}`); dot.textContent = String(fingering.fingerPositions[stringIndex] || ""); dot.setAttribute("aria-label", `${noteAt(stringIndex, fret)}, dedo ${fingering.fingerPositions[stringIndex]}`); cell.append(dot); } diagram.append(cell); }); }
   card.append(diagram); return card;
+}
+function fretMarkerText(fret: number): string {
+  if (fret === -1) return "x";
+  if (fret === 0) return "o";
+  return "";
+}
+function voicingCountText(count: number): string {
+  if (count === 0) return "Sin digitaciones disponibles en los primeros 12 trastes";
+  const suffix = count === 1 ? "" : "es";
+  return `${count} digitación${suffix} en el mástil`;
 }
 function chordBuilderView(state: State, onChange: () => void): HTMLElement {
   const section = el("section", "catalog-view chord-builder-view");
@@ -227,7 +323,7 @@ function chordBuilderView(state: State, onChange: () => void): HTMLElement {
   if (result.intervals.length > 0) {
     const voicings = findChordVoicings(builder);
     const diagramsHeading = el("div", "diagrams-heading");
-    const count = el("h3"); count.textContent = voicings.length > 0 ? `${voicings.length} digitación${voicings.length === 1 ? "" : "es"} en el mástil` : "Sin digitaciones disponibles en los primeros 12 trastes";
+    const count = el("h3"); count.textContent = voicingCountText(voicings.length);
     const caption = el("p", "diagrams-caption"); caption.textContent = "\"x\" = cuerda silenciada · \"o\" = cuerda al aire · el número indica el dedo (1 índice, 2 corazón, 3 anular, 4 meñique).";
     diagramsHeading.append(count, caption); section.append(diagramsHeading);
     const diagrams = el("div", "chord-diagrams"); voicings.forEach((fingering) => diagrams.append(fingeringDiagram(fingering, builder.root))); section.append(diagrams);
@@ -261,19 +357,32 @@ function cagedBoxElement(box: CagedWindow, range: Range): HTMLElement {
   div.dataset.label = box.shape;
   return div;
 }
+function inlayClass(fret: number, stringIndex: number): string {
+  if ([3, 5, 7, 9].includes(fret) && (stringIndex === 2 || stringIndex === 3)) return " inlay-single";
+  if (fret === 12 && [1, 2, 3, 4].includes(stringIndex)) return " inlay-double";
+  return "";
+}
+function boardCell(marks: FretMark[], display: DisplayMode, stringIndex: number, fret: number): HTMLElement {
+  const cell = el("div", `cell string-${stringIndex + 1}${fret === 0 ? " open" : ""}${inlayClass(fret, stringIndex)}`);
+  const mark = marks.find((candidate) => candidate.stringIndex === stringIndex && candidate.fret === fret);
+  if (mark) {
+    const note = el("span", `marker ${mark.kind}`);
+    note.textContent = markerText(mark, display);
+    cell.append(note);
+  } else if (fret === 0) {
+    const openNote = el("span", "open-note");
+    openNote.textContent = STRINGS[stringIndex];
+    cell.append(openNote);
+  }
+  return cell;
+}
 function board(marks: FretMark[], range: Range, display: DisplayMode, cagedBoxes: CagedWindow[] = []): HTMLElement {
   const wrapper = el("div", "board-wrap"); const fretColumns = range.end - range.start + 1; const boardElement = el("div", `board frets-${fretColumns}`); wrapper.classList.add(`range-${fretColumns}`);
   for (let fret = range.start; fret <= range.end; fret += 1) { const number = el("div", "fret-number"); number.textContent = String(fret); boardElement.append(number); }
   cagedBoxes.forEach((box) => boardElement.append(cagedBoxElement(box, range)));
-  const reversedStrings = [5, 4, 3, 2, 1, 0];
-  for (const stringIndex of reversedStrings) {
-    const stringNumber = stringIndex + 1;
+  for (const stringIndex of [5, 4, 3, 2, 1, 0]) {
     for (let fret = range.start; fret <= range.end; fret += 1) {
-      const inlay = [3, 5, 7, 9].includes(fret) && (stringIndex === 2 || stringIndex === 3) ? " inlay-single" : fret === 12 && (stringIndex === 1 || stringIndex === 2 || stringIndex === 3 || stringIndex === 4) ? " inlay-double" : "";
-      const cell = el("div", `cell string-${stringNumber}${fret === 0 ? " open" : ""}${inlay}`); const mark = marks.find((candidate) => candidate.stringIndex === stringIndex && candidate.fret === fret);
-      if (mark) { const note = el("span", `marker ${mark.kind}`); note.textContent = markerText(mark, display); cell.append(note); }
-      else if (fret === 0) { const label2 = el("span", "open-note"); label2.textContent = STRINGS[stringIndex]; cell.append(label2); }
-      boardElement.append(cell);
+      boardElement.append(boardCell(marks, display, stringIndex, fret));
     }
   }
   wrapper.append(boardElement); return wrapper;
