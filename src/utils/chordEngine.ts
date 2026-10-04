@@ -15,6 +15,8 @@
 import { NOTES, type Note } from "../data/data";
 import { addInterval, MusicNote } from "./domain";
 import { CAGED_TEMPLATES, computeAnchorFret, resolveCagedShape, type CagedQuality, type CagedTemplate } from "../data/cagedTemplates";
+import { getAlternateShapeData } from "../data/alternateShapesData";
+import type { CAGEDPositionIndex, ProgressionChordShape, ProgressionID } from "../types/guitar";
 
 // ─── Tipos base ────────────────────────────────────────────────
 
@@ -29,6 +31,50 @@ export type ChordQualityId =
   | "shell_Maj7" | "shell_min7" | "shell_dom7";
 
 export type CagedShapeId = "C" | "A" | "G" | "E" | "D";
+export type CagedTemplateQuality = CagedQuality;
+const CAGED_POSITION_BY_SHAPE: Record<CagedShapeId, CAGEDPositionIndex> = { C: 1, A: 2, G: 3, E: 4, D: 5 };
+export type ChordVoicingLayout =
+  | { kind: "shell" }
+  | { kind: "drop2"; sourceQuality: "Maj7" | "min7" | "dom7" }
+  | { kind: "drop3"; sourceQuality: "Maj7" | "min7" };
+
+export function toRomanFret(fret: number): string {
+  if (!Number.isInteger(fret) || fret <= 0) return String(fret);
+  const values: ReadonlyArray<[number, string]> = [
+    [1000, "M"], [900, "CM"], [500, "D"], [400, "CD"], [100, "C"], [90, "XC"],
+    [50, "L"], [40, "XL"], [10, "X"], [9, "IX"], [5, "V"], [4, "IV"], [1, "I"],
+  ];
+  let remaining = fret;
+  let roman = "";
+  for (const [value, symbol] of values) {
+    while (remaining >= value) {
+      roman += symbol;
+      remaining -= value;
+    }
+  }
+  return roman;
+}
+
+const CAGED_QUALITY_BY_CHORD_ID: Partial<Record<ChordQualityId, CagedTemplateQuality>> = {
+  Maj: "major",
+  min: "minor",
+  dom7: "dom7",
+  Maj7: "Maj7",
+  min7: "min7",
+};
+
+export function cagedTemplateQualityForChord(qualityId: ChordQualityId): CagedTemplateQuality {
+  return CAGED_QUALITY_BY_CHORD_ID[qualityId] ?? (CHORD_QUALITIES[qualityId].intervals.includes(3) ? "minor" : "major");
+}
+
+export function cagedTemplateQualityForSelection(qualityId: string): CagedTemplateQuality {
+  const direct: Record<string, CagedTemplateQuality> = {
+    Maj: "major", min: "minor", dom7: "dom7", Maj7: "Maj7", min7: "min7",
+  };
+  if (direct[qualityId]) return direct[qualityId];
+  const mappedQualityId = cagedQualityToEngine(qualityId);
+  return cagedTemplateQualityForChord(mappedQualityId);
+}
 
 /** Definición de un tipo de acorde */
 export interface ChordQuality {
@@ -40,6 +86,7 @@ export interface ChordQuality {
   intervals: number[];
   /** Intervalos opcionales (color) */
   optional?: number[];
+  voicingLayout?: ChordVoicingLayout;
   symbol: string;
 }
 
@@ -76,14 +123,14 @@ export const CHORD_QUALITIES: Record<ChordQualityId, ChordQuality> = {
   add9: { id: "add9", label: "Add 9", family: "alternativo", intervals: [0, 4, 7, 2], symbol: "add9" },
   add11: { id: "add11", label: "Add 11", family: "alternativo", intervals: [0, 4, 7, 5], symbol: "add11" },
   madd9: { id: "madd9", label: "Menor add 9", family: "alternativo", intervals: [0, 3, 7, 2], symbol: "madd9" },
-  drop2_Maj7: { id: "drop2_Maj7", label: "Drop 2 — Maj7", family: "voicing", intervals: [0, 4, 11, 7], symbol: "maj7 Drop2" },
-  drop2_min7: { id: "drop2_min7", label: "Drop 2 — min7", family: "voicing", intervals: [0, 3, 10, 7], symbol: "m7 Drop2" },
-  drop2_dom7: { id: "drop2_dom7", label: "Drop 2 — dom7", family: "voicing", intervals: [0, 4, 10, 7], symbol: "7 Drop2" },
-  drop3_Maj7: { id: "drop3_Maj7", label: "Drop 3 — Maj7", family: "voicing", intervals: [0, 11, 4, 7], symbol: "maj7 Drop3" },
-  drop3_min7: { id: "drop3_min7", label: "Drop 3 — min7", family: "voicing", intervals: [0, 10, 3, 7], symbol: "m7 Drop3" },
-  shell_Maj7: { id: "shell_Maj7", label: "Shell — Maj7", family: "voicing", intervals: [0, 4, 11], symbol: "maj7 Shell" },
-  shell_min7: { id: "shell_min7", label: "Shell — min7", family: "voicing", intervals: [0, 3, 10], symbol: "m7 Shell" },
-  shell_dom7: { id: "shell_dom7", label: "Shell — dom7", family: "voicing", intervals: [0, 4, 10], symbol: "7 Shell" },
+  drop2_Maj7: { id: "drop2_Maj7", label: "Drop 2 — Maj7", family: "voicing", intervals: [0, 4, 11, 7], voicingLayout: { kind: "drop2", sourceQuality: "Maj7" }, symbol: "maj7 Drop2" },
+  drop2_min7: { id: "drop2_min7", label: "Drop 2 — min7", family: "voicing", intervals: [0, 3, 10, 7], voicingLayout: { kind: "drop2", sourceQuality: "min7" }, symbol: "m7 Drop2" },
+  drop2_dom7: { id: "drop2_dom7", label: "Drop 2 — dom7", family: "voicing", intervals: [0, 4, 10, 7], voicingLayout: { kind: "drop2", sourceQuality: "dom7" }, symbol: "7 Drop2" },
+  drop3_Maj7: { id: "drop3_Maj7", label: "Drop 3 — Maj7", family: "voicing", intervals: [0, 11, 4, 7], voicingLayout: { kind: "drop3", sourceQuality: "Maj7" }, symbol: "maj7 Drop3" },
+  drop3_min7: { id: "drop3_min7", label: "Drop 3 — min7", family: "voicing", intervals: [0, 10, 3, 7], voicingLayout: { kind: "drop3", sourceQuality: "min7" }, symbol: "m7 Drop3" },
+  shell_Maj7: { id: "shell_Maj7", label: "Shell — Maj7", family: "voicing", intervals: [0, 4, 11], voicingLayout: { kind: "shell" }, symbol: "maj7 Shell" },
+  shell_min7: { id: "shell_min7", label: "Shell — min7", family: "voicing", intervals: [0, 3, 10], voicingLayout: { kind: "shell" }, symbol: "m7 Shell" },
+  shell_dom7: { id: "shell_dom7", label: "Shell — dom7", family: "voicing", intervals: [0, 4, 10], voicingLayout: { kind: "shell" }, symbol: "7 Shell" },
 };
 
 // ─── Progresiones ──────────────────────────────────────────────
@@ -157,10 +204,58 @@ export const PROGRESSIONS: Progression[] = [
 /** Sustitución de calidad: reemplaza la calidad estándar de un grado por una alternativa */
 export type AlternateShapeId = "sus2" | "sus4" | "add9" | "min11" | "Maj9";
 
-export const ALTERNATE_SHAPE_MAP: Partial<Record<ChordQualityId, Record<AlternateShapeId, ChordQualityId>>> = {
-  Maj: { sus2: "sus2", sus4: "sus4", add9: "add9", min11: "Maj11", Maj9: "Maj9" },
-  min: { sus2: "sus2", sus4: "sus4", add9: "madd9", min11: "min11", Maj9: "min9" },
-};
+export type AlternateDegreeMatrix = Partial<Record<RomanNumeral, Partial<Record<AlternateShapeId, ChordQualityId>>>>;
+export type AlternateShapeMatrix = Partial<Record<Note, Partial<Record<string, Partial<Record<CagedShapeId, AlternateDegreeMatrix>>>>>>;
+
+function alternateQualityForDegree(qualityId: ChordQualityId, alternate: AlternateShapeId): ChordQualityId | undefined {
+  if (qualityId !== "Maj" && qualityId !== "min") return undefined;
+  switch (alternate) {
+    case "sus2":
+    case "sus4":
+      return alternate;
+    case "add9":
+      return qualityId === "Maj" ? "add9" : "madd9";
+    case "min11":
+      return qualityId === "Maj" ? "Maj11" : "min11";
+    case "Maj9":
+      return qualityId === "Maj" ? "Maj9" : "min9";
+  }
+}
+
+function alternateOptionsForDegree(qualityId: ChordQualityId): Partial<Record<AlternateShapeId, ChordQualityId>> {
+  const options: Partial<Record<AlternateShapeId, ChordQualityId>> = {};
+  const alternates: AlternateShapeId[] = ["sus2", "sus4", "add9", "min11", "Maj9"];
+  for (const alternate of alternates) {
+    const quality = alternateQualityForDegree(qualityId, alternate);
+    if (quality) options[alternate] = quality;
+  }
+  return options;
+}
+
+function alternateShapeMatrixForProgression(progression: Progression): Partial<Record<CagedShapeId, AlternateDegreeMatrix>> {
+  const byShape: Partial<Record<CagedShapeId, AlternateDegreeMatrix>> = {};
+  const shapes: CagedShapeId[] = ["C", "A", "G", "E", "D"];
+  for (const shape of shapes) {
+    const byDegree: AlternateDegreeMatrix = {};
+    for (const degree of progression.degrees) byDegree[degree.numeral] = alternateOptionsForDegree(degree.quality);
+    byShape[shape] = byDegree;
+  }
+  return byShape;
+}
+
+function createAlternateShapeMatrix(): AlternateShapeMatrix {
+  const matrix: AlternateShapeMatrix = {};
+  for (const root of NOTES) {
+    const byProgression: NonNullable<AlternateShapeMatrix[Note]> = {};
+    for (const progression of PROGRESSIONS) {
+      byProgression[progression.id] = alternateShapeMatrixForProgression(progression);
+    }
+    matrix[root] = byProgression;
+  }
+  return matrix;
+}
+
+export const ALTERNATE_SHAPE_MATRIX = createAlternateShapeMatrix();
 
 // ─── Acordes transpuestos ──────────────────────────────────────
 
@@ -171,6 +266,9 @@ export interface TransposedChord {
   notes: string[];
   /** Nombre del cifrado */
   name: string;
+  strings?: ProgressionChordShape["strings"];
+  fretNumber?: ProgressionChordShape["fretNumber"];
+  romanFret?: string;
 }
 
 function diatonicStepsForInterval(interval: number, qualityId: ChordQualityId): number {
@@ -209,17 +307,50 @@ export function buildProgressionChords(
   tonicRoot: Note,
   progressionId: string,
   alternate?: AlternateShapeId,
+  cagedShape: CagedShapeId = "E",
 ): TransposedChord[] {
   const prog = PROGRESSIONS.find((p) => p.id === progressionId);
   if (!prog) return [];
+
+  if (alternate) {
+    const predefined = getAlternateShapeData(
+      tonicRoot,
+      progressionId as ProgressionID,
+      CAGED_POSITION_BY_SHAPE[cagedShape],
+    );
+    if (predefined?.length === prog.degrees.length) {
+      return prog.degrees.map((degree, index) => {
+        const data = predefined[index];
+        const chordRoot = progressionRoot(tonicRoot, degree);
+        const qualityId = qualityForAlternateData(data.chordName, chordRoot) ?? degree.quality;
+        const chord = buildTransposedChord(chordRoot, qualityId);
+        return {
+          ...chord,
+          name: data.chordName,
+          strings: data.strings,
+          fretNumber: data.fretNumber,
+          romanFret: data.romanFret,
+        };
+      });
+    }
+  }
+
   return prog.degrees.map((degree) => {
     const chordRoot = progressionRoot(tonicRoot, degree);
     let qualityId = degree.quality;
-    if (alternate && ALTERNATE_SHAPE_MAP[qualityId]?.[alternate]) {
-      qualityId = ALTERNATE_SHAPE_MAP[qualityId]![alternate]!;
+    if (alternate) {
+      qualityId = ALTERNATE_SHAPE_MATRIX[tonicRoot]?.[progressionId]?.[cagedShape]?.[degree.numeral]?.[alternate] ?? qualityId;
     }
     return buildTransposedChord(chordRoot, qualityId);
   });
+}
+
+function qualityForAlternateData(chordName: string, root: string): ChordQualityId | undefined {
+  const suffix = chordName.startsWith(root) ? chordName.slice(root.length) : "";
+  const qualityBySuffix: Record<string, ChordQualityId> = {
+    sus2: "sus2", sus4: "sus4", add9: "add9", m7: "min7", M9: "Maj9",
+  };
+  return qualityBySuffix[suffix];
 }
 
 // ─── Voicings CAGED por posición ───────────────────────────────
@@ -231,6 +362,93 @@ export interface CagedPositionVoicing {
   complete: boolean;
   mutedStrings: number[];
   barre?: { fret: number; fromString: number; toString: number };
+}
+
+export interface ArrangedChordVoicing {
+  qualityId: ChordQualityId;
+  layout: "shell" | "drop2" | "drop3";
+  stringSet: string;
+  droppedInterval?: number;
+  complete: true;
+  notes: Array<{ string: number; fret: number; midi: number; interval: number; finger: number }>;
+}
+
+const OPEN_STRING_MIDI = [64, 59, 55, 50, 45, 40] as const;
+const ARRANGEMENT_STRINGS: Record<ChordVoicingLayout["kind"], number[][]> = {
+  shell: [[5, 3, 2], [4, 3, 2]],
+  drop2: [[5, 4, 3, 2], [4, 3, 2, 1], [3, 2, 1, 0]],
+  drop3: [[5, 3, 2, 1], [4, 2, 1, 0]],
+};
+
+interface ArrangementPlan {
+  tones: Array<{ interval: number; midi: number }>;
+  droppedInterval?: number;
+}
+
+function arrangementPlan(rootMidi: number, quality: ChordQuality, layout: ChordVoicingLayout): ArrangementPlan {
+  const source = layout.kind === "shell" ? quality : CHORD_QUALITIES[layout.sourceQuality];
+  const chordTones = [...new Set(source.intervals)].sort((left, right) => left - right);
+  const tones = chordTones.map((interval) => ({ interval, midi: rootMidi + interval }));
+  let droppedInterval: number | undefined;
+
+  if (layout.kind === "drop2" || layout.kind === "drop3") {
+    const voiceIndex = layout.kind === "drop2" ? chordTones.length - 2 : chordTones.length - 3;
+    droppedInterval = chordTones[voiceIndex];
+    tones[voiceIndex] = { interval: droppedInterval, midi: tones[voiceIndex].midi - 12 };
+    tones.sort((left, right) => left.midi - right.midi);
+  }
+  return { tones, droppedInterval };
+}
+
+function arrangeOnStringSet(
+  strings: readonly number[],
+  tones: readonly { interval: number; midi: number }[],
+  qualityId: ChordQualityId,
+  layout: ChordVoicingLayout["kind"],
+  droppedInterval?: number,
+): ArrangedChordVoicing | undefined {
+  if (strings.length !== tones.length) return undefined;
+  const notes = strings.map((stringIndex, index) => {
+    const tone = tones[index];
+    const fret = tone.midi - OPEN_STRING_MIDI[stringIndex];
+    return { string: stringIndex, fret, midi: tone.midi, interval: tone.interval, finger: 0 };
+  });
+  if (notes.some((note) => note.fret < 0 || note.fret > 24)) return undefined;
+
+  const fretted = [...new Set(notes.filter((note) => note.fret > 0).map((note) => note.fret))].sort((left, right) => left - right);
+  const fingerByFret = new Map(fretted.map((fret, index) => [fret, index + 1]));
+  notes.forEach((note) => { note.finger = note.fret === 0 ? 0 : fingerByFret.get(note.fret) ?? 0; });
+  return {
+    qualityId,
+    layout,
+    stringSet: strings.map((stringIndex) => stringIndex + 1).join("-"),
+    droppedInterval,
+    complete: true,
+    notes,
+  };
+}
+
+/** Calcula disposiciones reales de cuerdas/octavas para las calidades family=voicing. */
+export function buildArrangedVoicings(root: string, qualityId: ChordQualityId): ArrangedChordVoicing[] {
+  const quality = CHORD_QUALITIES[qualityId];
+  const layout = quality.voicingLayout;
+  if (quality.family !== "voicing" || !layout) return [];
+  const rootMidi = MusicNote.parse(root).absoluteSemitones + 12;
+  const plan = arrangementPlan(rootMidi, quality, layout);
+  const results: ArrangedChordVoicing[] = [];
+  const seen = new Set<string>();
+  for (const octaveShift of [-24, -12, 0, 12, 24]) {
+    const shiftedTones = plan.tones.map((tone) => ({ ...tone, midi: tone.midi + octaveShift }));
+    for (const strings of ARRANGEMENT_STRINGS[layout.kind]) {
+      const voicing = arrangeOnStringSet(strings, shiftedTones, qualityId, layout.kind, plan.droppedInterval);
+      if (!voicing) continue;
+      const key = `${strings.join("")}:${voicing.notes.map((note) => note.fret).join(",")}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      results.push(voicing);
+    }
+  }
+  return results;
 }
 
 /**

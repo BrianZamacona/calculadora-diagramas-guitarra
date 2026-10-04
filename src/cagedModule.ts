@@ -17,11 +17,12 @@ import {
   buildCagedVoicings,
   buildProgressionChords,
   PROGRESSIONS,
-  CHORD_QUALITIES,
-  cagedQualityToEngine,
+  cagedTemplateQualityForChord,
+  cagedTemplateQualityForSelection,
+  toRomanFret,
   type CagedPositionVoicing,
+  type CagedShapeId,
   type AlternateShapeId,
-  type ChordQualityId,
 } from "./utils/chordEngine";
 import { renderCAGEDFretboard, exportSVGToFile } from "./components/CAGEDFretboard";
 import { playArpeggio, playStrum, stopAudio, setAudioBPM } from "./services/audio";
@@ -79,6 +80,8 @@ export function mountCagedModule(container: HTMLElement): void {
 
   let currentVoicings: CagedPositionVoicing[] = [];
   let currentSVG: SVGElement | null = null;
+
+  const activeShape = (): CagedShapeId => currentVoicings[state.selectedShapeIdx]?.shape ?? "E";
 
   // ── Layout principal ──────────────────────────────────────
   const section = el("section", "caged-advanced-section");
@@ -209,10 +212,10 @@ export function mountCagedModule(container: HTMLElement): void {
   btnPDF.id = "btn-export-pdf";
   btnPDF.addEventListener("click", () => {
     if (!state.progressionId) return;
-    const progChords = buildProgressionChords(state.tonic, state.progressionId);
+    const progChords = buildProgressionChords(state.tonic, state.progressionId, state.altShape === "none" ? undefined : state.altShape, activeShape());
     const chordData = progChords.map((chord) => ({
       chord,
-      voicings: buildCagedVoicings(chord.root, chord.quality.intervals.includes(3) ? "minor" : "major"),
+      voicings: buildCagedVoicings(chord.root, cagedTemplateQualityForChord(chord.quality.id)),
     }));
     const prog = PROGRESSIONS.find((p) => p.id === state.progressionId);
     exportProgressionPDF(prog?.label ?? state.progressionId, state.tonic, chordData);
@@ -222,10 +225,10 @@ export function mountCagedModule(container: HTMLElement): void {
   btnMIDI.id = "btn-export-midi";
   btnMIDI.addEventListener("click", () => {
     if (!state.progressionId) return;
-    const progChords = buildProgressionChords(state.tonic, state.progressionId);
+    const progChords = buildProgressionChords(state.tonic, state.progressionId, state.altShape === "none" ? undefined : state.altShape, activeShape());
     const midiData = progChords.map((chord) => ({
       chord,
-      voicing: buildCagedVoicings(chord.root, chord.quality.intervals.includes(3) ? "minor" : "major")[0],
+      voicing: buildCagedVoicings(chord.root, cagedTemplateQualityForChord(chord.quality.id))[0],
     })).filter((d) => d.voicing);
     exportProgressionMIDI(midiData, state.bpm, `progresion-${state.tonic}.mid`);
   });
@@ -236,9 +239,7 @@ export function mountCagedModule(container: HTMLElement): void {
   function redraw(): void {
     // Calcular voicings del acorde actual
     const quality = state.cagedQuality;
-    const qualityIntervals = CHORD_QUALITIES[cagedQualityToEngine(quality) as ChordQualityId].intervals;
-    const isMinor = qualityIntervals.includes(3);
-    currentVoicings = buildCagedVoicings(state.tonic, isMinor ? "minor" : "major");
+    currentVoicings = buildCagedVoicings(state.tonic, cagedTemplateQualityForSelection(quality));
 
     // Renderizar panel de progresión
     progressionPanel.replaceChildren();
@@ -247,6 +248,7 @@ export function mountCagedModule(container: HTMLElement): void {
         state.tonic,
         state.progressionId,
         state.altShape !== "none" ? state.altShape : undefined,
+        activeShape(),
       );
       if (progChords.length > 0) {
         const progTitle = el("h3", "progression-title");
@@ -261,8 +263,7 @@ export function mountCagedModule(container: HTMLElement): void {
           btn.addEventListener("click", () => {
             state.selectedChordIdx = idx;
             // Actualizar voicings para este acorde de la progresión
-            const pIsMinor = chord.quality.intervals.includes(3);
-            currentVoicings = buildCagedVoicings(chord.root, pIsMinor ? "minor" : "major");
+            currentVoicings = buildCagedVoicings(chord.root, cagedTemplateQualityForChord(chord.quality.id));
             redrawDiagram();
             chordBtns.querySelectorAll(".chord-pill").forEach((b, i) => b.classList.toggle("active", i === idx));
           });
@@ -276,7 +277,7 @@ export function mountCagedModule(container: HTMLElement): void {
     shapeTabs.replaceChildren();
     currentVoicings.slice(0, 5).forEach((v, idx) => {
       const tab = el("button", `shape-tab${idx === state.selectedShapeIdx ? " active" : ""}`);
-      tab.textContent = `${v.shape} · T${v.anchorFret}`;
+      tab.textContent = `${v.shape} · T${toRomanFret(v.anchorFret)}`;
       tab.id = `shape-tab-${idx}`;
       tab.addEventListener("click", () => {
         state.selectedShapeIdx = idx;

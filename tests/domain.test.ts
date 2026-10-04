@@ -72,10 +72,10 @@ describe("domain musical", () => {
     const allowed = new Set(["C", "E", "G"]);
     voicings.forEach((voicing) => {
       let bassString = -1;
-      for (let index = 5; index >= 0; index -= 1) { if (voicing.fretPositions[index] !== -1) { bassString = index; break; } }
+      for (let index = 5; index >= 0; index -= 1) { if (voicing.fretPositions[index] !== "x") { bassString = index; break; } }
       expect(bassString).toBeGreaterThanOrEqual(0);
       expect(noteAt(bassString, voicing.fretPositions[bassString] as number)).toBe("C");
-      voicing.fretPositions.forEach((fret, stringIndex) => { if (fret !== -1) expect(allowed.has(noteAt(stringIndex, fret))).toBe(true); });
+      voicing.fretPositions.forEach((fret, stringIndex) => { if (fret !== "x") expect(allowed.has(noteAt(stringIndex, fret))).toBe(true); });
     });
   });
 
@@ -83,7 +83,7 @@ describe("domain musical", () => {
     const voicings = findChordVoicings({ root: "G", base: "major", bass: undefined, fifth: "5", seventh: "7M", extensions: ["9"], additions: [] });
     expect(voicings.length).toBeGreaterThan(0);
     voicings.forEach((voicing) => {
-      const fretted = voicing.fretPositions.filter((fret): fret is number => fret > 0);
+      const fretted = voicing.fretPositions.filter((fret): fret is number => typeof fret === "number" && fret > 0);
       if (fretted.length > 0) expect(Math.max(...fretted) - Math.min(...fretted)).toBeLessThanOrEqual(3);
       expect(new Set(fretted).size).toBeLessThanOrEqual(4);
     });
@@ -111,7 +111,7 @@ describe("domain musical", () => {
     const voicings = findVoicingsForIntervals("E", [0, 7]);
     expect(voicings.length).toBeGreaterThan(0);
     voicings.forEach((voicing) => {
-      const notes = voicing.fretPositions.reduce<string[]>((acc, fret, stringIndex) => { if (fret !== -1) acc.push(noteAt(stringIndex, fret)); return acc; }, []);
+      const notes = voicing.fretPositions.reduce<string[]>((acc, fret, stringIndex) => { if (fret !== "x") acc.push(noteAt(stringIndex, fret)); return acc; }, []);
       expect(notes).toContain("E");
       expect(notes).toContain("B");
     });
@@ -122,7 +122,7 @@ describe("domain musical", () => {
     expect(voicings.length).toBeGreaterThan(0);
     voicings.forEach((voicing) => {
       let bassString = -1;
-      for (let index = 5; index >= 0; index -= 1) { if (voicing.fretPositions[index] !== -1) { bassString = index; break; } }
+      for (let index = 5; index >= 0; index -= 1) { if (voicing.fretPositions[index] !== "x") { bassString = index; break; } }
       expect(noteAt(bassString, voicing.fretPositions[bassString] as number)).toBe("E");
     });
   });

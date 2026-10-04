@@ -28,9 +28,10 @@ export interface BuiltChord {
   intervals: number[];
   bass?: Note;
 }
+export type FretPosition = number | "x";
 export interface ChordVoicing {
   title: string;
-  fretPositions: readonly number[];
+  fretPositions: readonly FretPosition[];
   fingerPositions: readonly number[];
   baseFret: number;
   position: "abierta" | "cejilla" | "movible";
@@ -185,7 +186,7 @@ const MAX_VOICING_RESULTS = 12;
 const MAX_RAW_VOICINGS = 300;
 
 interface RawVoicing {
-  frets: number[];
+  frets: FretPosition[];
   coverage: number;
   soundingStrings: number;
   baseFret: number;
@@ -202,15 +203,15 @@ function searchVoicings(rootIndex: number, mustHave: readonly number[], niceToHa
   const allowed = new Set<number>([...must, ...nice]);
   const results: RawVoicing[] = [];
   if (must.size > 6) return results;
-  const frets: number[] = [-1, -1, -1, -1, -1, -1];
+  const frets: FretPosition[] = ["x", "x", "x", "x", "x", "x"];
 
   const finalize = (soundingStrings: number, covered: Set<number>): void => {
     if (soundingStrings < MIN_SOUNDING_STRINGS) return;
     for (const pitch of must) if (!covered.has(pitch)) return;
     const fretCounts = new Map<number, number>();
-    frets.forEach((fret) => { if (fret > 0) fretCounts.set(fret, (fretCounts.get(fret) ?? 0) + 1); });
+    frets.forEach((fret) => { if (typeof fret === "number" && fret > 0) fretCounts.set(fret, (fretCounts.get(fret) ?? 0) + 1); });
     if (fretCounts.size > MAX_FINGERS) return;
-    const fretted = frets.filter((fret) => fret > 0);
+    const fretted = frets.filter((fret): fret is number => typeof fret === "number" && fret > 0);
     const baseFret = fretted.length > 0 ? Math.min(...fretted) : 0;
     let coverage = 0;
     covered.forEach((pitch) => { if (nice.has(pitch)) coverage += 1; });
@@ -220,7 +221,7 @@ function searchVoicings(rootIndex: number, mustHave: readonly number[], niceToHa
   const recurse = (stringIndex: number, bassFound: boolean, minFret: number, maxFret: number, soundingStrings: number, covered: Set<number>): void => {
     if (results.length >= MAX_RAW_VOICINGS) return;
     if (stringIndex < 0) { finalize(soundingStrings, covered); return; }
-    frets[stringIndex] = -1;
+    frets[stringIndex] = "x";
     recurse(stringIndex - 1, bassFound, minFret, maxFret, soundingStrings, covered);
     const openPitch = TUNING[stringIndex];
     const openValid = bassFound ? allowed.has(openPitch) : openPitch === bassIndex;
@@ -240,7 +241,7 @@ function searchVoicings(rootIndex: number, mustHave: readonly number[], niceToHa
       const nextCovered = covered.has(pitch) ? covered : new Set(covered).add(pitch);
       recurse(stringIndex - 1, true, nextMin, nextMax, soundingStrings + 1, nextCovered);
     }
-    frets[stringIndex] = -1;
+    frets[stringIndex] = "x";
   };
 
   recurse(5, false, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, 0, new Set());
@@ -255,23 +256,23 @@ function isBetterVoicing(candidate: RawVoicing, current: RawVoicing): boolean {
 
 function toVoicing(raw: RawVoicing): ChordVoicing {
   const frets = raw.frets;
-  const distinctFrets = [...new Set(frets.filter((fret) => fret > 0))].sort((left, right) => left - right);
+  const distinctFrets = [...new Set(frets.filter((fret): fret is number => typeof fret === "number" && fret > 0))].sort((left, right) => left - right);
   const fingerByFret = new Map<number, number>(distinctFrets.map((fret, index) => [fret, index + 1]));
-  const fingerPositions = frets.map((fret) => (fret > 0 ? fingerByFret.get(fret) ?? 0 : 0));
+  const fingerPositions = frets.map((fret) => (typeof fret === "number" && fret > 0 ? fingerByFret.get(fret) ?? 0 : 0));
   // Un traste compartido por 2+ cuerdas implica dedo índice en cejilla: el dedo se apoya en todo
   // el ancho de cuerdas que suenan, aunque otros dedos pisen trastes más altos en medio.
   let barre: ChordVoicing["barre"];
   if (distinctFrets.length > 0) {
     const lowestFret = distinctFrets[0];
     const soundingIndices = frets.reduce<number[]>((acc, fret, index) => {
-      if (fret !== -1) acc.push(index);
+      if (fret !== "x") acc.push(index);
       return acc;
     }, []);
     const atLowestCount = frets.filter((fret) => fret === lowestFret).length;
     if (atLowestCount >= 2 && soundingIndices.length > 0) barre = { fret: lowestFret, fromString: soundingIndices[0], toString: soundingIndices.at(-1)! };
   }
   let rootStringIndex = 0;
-  for (let index = 5; index >= 0; index -= 1) { if (frets[index] !== -1) { rootStringIndex = index; break; } }
+  for (let index = 5; index >= 0; index -= 1) { if (frets[index] !== "x") { rootStringIndex = index; break; } }
   let position: ChordVoicing["position"] = "movible";
   if (raw.baseFret === 0) position = "abierta";
   else if (barre) position = "cejilla";

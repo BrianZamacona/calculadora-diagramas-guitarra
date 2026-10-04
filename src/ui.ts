@@ -1,5 +1,6 @@
 import { ARPEGGIOS, CHORD_CATEGORIES, CHORD_GLOSSARY, CAGED_QUALITIES, CAGED_SHAPES, FRET_COUNT, NOTES, SCALES, STRINGS, type ArpeggioId, type CagedLayer, type CagedQuality, type CagedShape, type ChordGlossaryEntry, type ModuleId, type ScaleId } from "./data/data";
-import { buildChord, clampRange, findChordVoicings, findCagedBoxes, findCagedLayerMarks, findDoubleStops, findMarks, findScaleMarks, findVoicingMarks, findVoicingsForIntervals, noteAt, suggestNoteSets, type ChordBase, type ChordBuilderState, type ChordVoicing, type CagedWindow, type FretMark, type NoteSetSuggestion, type Range, type ScaleSystem } from "./utils/domain";
+import { buildChord, clampRange, findChordVoicings, findCagedBoxes, findCagedLayerMarks, findDoubleStops, findMarks, findScaleMarks, findVoicingMarks, findVoicingsForIntervals, noteAt, suggestNoteSets, type ChordBase, type ChordBuilderState, type ChordVoicing, type CagedWindow, type FretMark, type FretPosition, type NoteSetSuggestion, type Range, type ScaleSystem } from "./utils/domain";
+import { buildCagedVoicings, toRomanFret, type CagedPositionVoicing, type CagedTemplateQuality } from "./utils/chordEngine";
 import { mountCagedModule } from "./cagedModule";
 
 type DisplayMode = "notes" | "intervals" | "both";
@@ -277,9 +278,52 @@ function choiceGroup(labelText: string, values: readonly [string, string][], sel
   values.forEach(([value, labelTextValue]) => { const label = el("label", "choice-option"); const input = el("input"); input.type = "radio"; input.name = `choice-${labelText}`; input.value = value; input.checked = value === selected; input.addEventListener("change", () => onChange(value)); const text = el("span"); text.textContent = labelTextValue; label.append(input, text); group.append(label); });
   return group;
 }
+function cagedQualityForBuilder(builder: ChordBuilderState): CagedTemplateQuality | undefined {
+  const supportedFifth = builder.fifth === "none" || builder.fifth === "5";
+  const noAdditionalIntervals = builder.extensions.every((extension) => extension === "none") && builder.additions.length === 0;
+  const rootBass = !builder.bass || builder.bass === "none" || builder.bass === builder.root;
+  if (!supportedFifth || !noAdditionalIntervals || !rootBass) return undefined;
+
+  if (builder.base === "major") {
+    if (builder.seventh === "none") return "major";
+    if (builder.seventh === "7") return "dom7";
+    if (builder.seventh === "7M") return "Maj7";
+  }
+  if (builder.base === "minor") {
+    if (builder.seventh === "none") return "minor";
+    if (builder.seventh === "7") return "min7";
+  }
+  return undefined;
+}
+function cagedVoicingAsChordVoicing(voicing: CagedPositionVoicing): ChordVoicing {
+  const fretPositions: FretPosition[] = ["x", "x", "x", "x", "x", "x"];
+  const fingerPositions = [0, 0, 0, 0, 0, 0];
+  voicing.notes.forEach((note) => {
+    fretPositions[note.string] = note.fret;
+    fingerPositions[note.string] = note.finger;
+  });
+  const frettedNotes = voicing.notes.map((note) => note.fret).filter((fret) => fret > 0);
+  const diagramBaseFret = frettedNotes.length > 0 ? Math.min(...frettedNotes) : 0;
+  let position: ChordVoicing["position"] = "movible";
+  if (voicing.anchorFret === 0) position = "abierta";
+  else if (voicing.barre) position = "cejilla";
+  const partial = voicing.complete ? "" : " · parcial";
+  return {
+    title: `Forma ${voicing.shape} · traste ${toRomanFret(voicing.anchorFret)}${partial}`,
+    fretPositions,
+    fingerPositions,
+    baseFret: diagramBaseFret,
+    position,
+    barre: voicing.barre,
+  };
+}
+function libraryVoicingTitle(voicing: ChordVoicing): string {
+  if (voicing.baseFret === 0) return voicing.title;
+  return voicing.title.replace(/(traste\s+)(\d+)/i, (_match, label: string, fret: string) => `${label}${toRomanFret(Number(fret))}`);
+}
 function fingeringDiagram(fingering: ChordVoicing, root: string): HTMLElement {
-  const card = el("article", "chord-diagram-card"); const title = el("h3"); title.textContent = fingering.title; card.append(title);
-  const frets = fingering.fretPositions; const fretted = frets.filter((fret) => fret > 0); const maxFret = Math.max(1, ...fretted); const minFret = Math.max(1, fingering.baseFret);
+  const card = el("article", "chord-diagram-card"); const title = el("h3"); title.textContent = libraryVoicingTitle(fingering); card.append(title);
+  const frets = fingering.fretPositions; const fretted = frets.filter((fret): fret is number => typeof fret === "number" && fret > 0); const maxFret = Math.max(1, ...fretted); const minFret = Math.max(1, fingering.baseFret);
   const diagram = el("div", "fingering-diagram"); diagram.style.gridTemplateColumns = "repeat(6, 34px)";
   [5, 4, 3, 2, 1, 0].forEach((stringIndex) => { const fret = frets[stringIndex]; const marker = el("span", "fingering-open"); marker.textContent = fretMarkerText(fret); diagram.append(marker); });
   if (fingering.barre) {
@@ -297,8 +341,8 @@ function fingeringDiagram(fingering: ChordVoicing, root: string): HTMLElement {
   for (let fret = minFret; fret <= Math.max(minFret + 3, maxFret); fret += 1) { [5, 4, 3, 2, 1, 0].forEach((stringIndex) => { const cell = el("div", "fingering-cell"); if (frets[stringIndex] === fret) { const dot = el("span", `diagram-note ${noteAt(stringIndex, fret) === root ? "root" : ""}`); dot.textContent = String(fingering.fingerPositions[stringIndex] || ""); dot.setAttribute("aria-label", `${noteAt(stringIndex, fret)}, dedo ${fingering.fingerPositions[stringIndex]}`); cell.append(dot); } diagram.append(cell); }); }
   card.append(diagram); return card;
 }
-function fretMarkerText(fret: number): string {
-  if (fret === -1) return "x";
+function fretMarkerText(fret: FretPosition): string {
+  if (fret === "x") return "x";
   if (fret === 0) return "o";
   return "";
 }
@@ -321,9 +365,13 @@ function chordBuilderView(state: State, onChange: () => void): HTMLElement {
   controlsPanel.append(root, base, bass, fifth, seventh, extensions, additions); section.append(controlsPanel);
   const result = buildChord(builder); const resultPanel = el("div", "builder-result"); const resultTitle = el("p", "result-label"); resultTitle.textContent = "Cifrado resultante"; const name = el("strong", "result-name"); name.textContent = result.name || "Acorde no válido"; const notes = el("p"); notes.textContent = `Notas: ${result.notes.join(" - ") || "-"}`; const intervals = el("p"); intervals.textContent = `Intervalos absolutos: ${result.intervals.join(" - ") || "-"}`; resultPanel.append(resultTitle, name, notes, intervals); section.append(resultPanel);
   if (result.intervals.length > 0) {
-    const voicings = findChordVoicings(builder);
+    const cagedQuality = cagedQualityForBuilder(builder);
+    const cagedVoicings = cagedQuality ? buildCagedVoicings(builder.root, cagedQuality).map(cagedVoicingAsChordVoicing) : [];
+    const usesCaged = cagedVoicings.length > 0;
+    const voicings = usesCaged ? cagedVoicings : findChordVoicings(builder);
     const diagramsHeading = el("div", "diagrams-heading");
-    const count = el("h3"); count.textContent = voicingCountText(voicings.length);
+    const count = el("h3"); count.textContent = usesCaged ? `${voicings.length} formas CAGED` : voicingCountText(voicings.length);
+    if (!usesCaged && voicings.length > 0) count.textContent += " · otras posiciones";
     const caption = el("p", "diagrams-caption"); caption.textContent = "\"x\" = cuerda silenciada · \"o\" = cuerda al aire · el número indica el dedo (1 índice, 2 corazón, 3 anular, 4 meñique).";
     diagramsHeading.append(count, caption); section.append(diagramsHeading);
     const diagrams = el("div", "chord-diagrams"); voicings.forEach((fingering) => diagrams.append(fingeringDiagram(fingering, builder.root))); section.append(diagrams);

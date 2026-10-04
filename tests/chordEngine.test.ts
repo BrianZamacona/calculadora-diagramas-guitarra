@@ -9,7 +9,10 @@ import { describe, expect, it } from "vitest";
 import {
   buildTransposedChord,
   buildCagedVoicings,
+  buildArrangedVoicings,
   buildProgressionChords,
+  ALTERNATE_SHAPE_MATRIX,
+  cagedTemplateQualityForChord,
   generateAllCombinations,
   PROGRESSIONS,
   CHORD_QUALITIES,
@@ -17,6 +20,7 @@ import {
   INTERVAL_NAMES,
   cagedQualityToEngine,
   progressionNotes,
+  toRomanFret,
   type ChordQualityId,
 } from "../src/utils/chordEngine";
 import {
@@ -28,6 +32,7 @@ import {
 } from "../src/data/cagedTemplates";
 import { NOTES, TUNING } from "../src/data/data";
 import { MusicNote } from "../src/utils/domain";
+import { CLASSIC_ALTERNATE_SHAPES_DB, getAlternateShapeData } from "../src/data/alternateShapesData";
 
 // ─── Plantillas CAGED ─────────────────────────────────────────
 
@@ -185,6 +190,12 @@ describe("chordEngine · buildTransposedChord", () => {
 // ─── Voicings CAGED ───────────────────────────────────────────
 
 describe("chordEngine · buildCagedVoicings", () => {
+  it("preserva la calidad de séptima al mapearla al motor CAGED", () => {
+    expect(cagedTemplateQualityForChord("Maj7")).toBe("Maj7");
+    expect(cagedTemplateQualityForChord("dom7")).toBe("dom7");
+    expect(cagedTemplateQualityForChord("min7")).toBe("min7");
+  });
+
   it("genera al menos 5 voicings para C mayor", () => {
     const voicings = buildCagedVoicings("C", "major");
     expect(voicings.length).toBeGreaterThanOrEqual(5);
@@ -330,11 +341,65 @@ describe("chordEngine · buildProgressionChords", () => {
     expect(V?.quality.intervals).toContain(2); // sus2 tiene intervalo 2
   });
 
+  it("alternate matrix se direcciona por tonalidad, progresión, forma y grado", () => {
+    expect(ALTERNATE_SHAPE_MATRIX.C?.["v1-1"]?.C?.I?.sus4).toBe("sus4");
+    expect(ALTERNATE_SHAPE_MATRIX.D?.["v1-1"]?.A?.I?.sus4).toBe("sus4");
+    expect(buildProgressionChords("C", "v1-1", "sus4", "E")[0].quality.id).toBe("sus4");
+    expect(buildProgressionChords("C", "v1-1", "sus4", "A")[0].quality.id).toBe("sus4");
+  });
+
+  it("prioriza alternateShapesData con trastes romanos y usa fallback sin registro", () => {
+    const curated = buildProgressionChords("C", "v1-1", "sus2", "C");
+    expect(curated.map((chord) => chord.name)).toEqual(["Csus2", "Am7", "FM9", "Gsus4"]);
+    expect(curated[0].strings).toEqual(["x", 3, 0, 0, 1, 3]);
+    expect(curated[0].fretNumber).toBe(1);
+    expect(curated[0].romanFret).toBe("I");
+
+    const fallback = buildProgressionChords("C", "v1-2", "sus2", "E");
+    expect(fallback.find((chord) => chord.root === "G")?.quality.intervals).toContain(2);
+    expect(fallback[0].fretNumber).toBeUndefined();
+    expect(() => buildProgressionChords("C", "v9-unregistered", "sus2", "C")).not.toThrow();
+    expect(buildProgressionChords("C", "v9-unregistered", "sus2", "C")).toEqual([]);
+  });
+
   it("genera progresiones en las 12 tonalidades para Vol.3", () => {
     NOTES.forEach((root) => {
       const chords = buildProgressionChords(root, "v3-1");
       expect(chords).toHaveLength(4); // I-V-vi-iii
     });
+  });
+});
+
+describe("alternateShapesData · base de progresiones clásicas", () => {
+  it("contiene los voicings coloreados I-vi-IV-V en C", () => {
+    const data = getAlternateShapeData("C", "I-vi-IV-V", 1);
+    expect(data?.map((chord) => chord.chordName)).toEqual(["Csus2", "Am7", "FM9", "Gsus4"]);
+    expect(data?.[0].fretNumber).toBe(1);
+    expect(data?.[0].romanFret).toBe("I");
+    expect(data?.[0].strings).toEqual(["x", 3, 0, 0, 1, 3]);
+    expect(data?.[1].strings).toEqual(["x", 0, 2, 0, 1, 0]);
+    expect(data?.[2].strings).toEqual([1, "x", 2, 2, 1, 3]);
+    expect(data?.[3].strings).toEqual([3, 3, 0, 0, 1, 3]);
+  });
+
+  it("transpone los nombres y digitaciones al pedir una tonalidad distinta", () => {
+    const data = getAlternateShapeData("D", "I-vi-IV-V", 1);
+    expect(data?.map((chord) => chord.chordName)).toEqual(["Dsus2", "Bm7", "GM9", "Asus4"]);
+    expect(data?.[0].fretNumber).toBe(3);
+    expect(data?.[0].strings).toEqual(["x", 5, 2, 2, 3, 5]);
+  });
+
+  it("incluye la posición 3 de I-V-vi-IV con sus dos secuencias", () => {
+    const position = CLASSIC_ALTERNATE_SHAPES_DB.C?.["I-V-vi-IV"]?.find((item) => item.positionIndex === 3);
+    expect(position?.anchorFret).toBe(3);
+    expect(position?.cagedShapeName).toBe("C");
+    expect(position?.standardShapes.map((shape) => shape.chordName)).toEqual(["C", "G", "Am", "F"]);
+    expect(position?.alternateShapes.map((shape) => shape.chordName)).toEqual(["C", "Gsus4", "Am7", "FM9"]);
+  });
+
+  it("acepta los IDs existentes y devuelve null para formas aún no curadas", () => {
+    expect(getAlternateShapeData("C", "v1-1", 1)).toEqual(getAlternateShapeData("C", "I-vi-IV-V", 1));
+    expect(getAlternateShapeData("C", "v1-1", 2)).toBeNull();
   });
 });
 
@@ -356,6 +421,11 @@ describe("chordEngine · generateAllCombinations", () => {
 // ─── Calidades e intervalos ───────────────────────────────────
 
 describe("chordEngine · CHORD_QUALITIES e intervalos", () => {
+  it("convierte trastes a números romanos para la biblioteca", () => {
+    expect([1, 4, 9, 12, 24].map(toRomanFret)).toEqual(["I", "IV", "IX", "XII", "XXIV"]);
+    expect(toRomanFret(0)).toBe("0");
+  });
+
   it("todas las calidades tienen al menos 2 intervalos", () => {
     Object.values(CHORD_QUALITIES).forEach((q) => {
       expect(q.intervals.length).toBeGreaterThanOrEqual(2);
@@ -380,6 +450,29 @@ describe("chordEngine · CHORD_QUALITIES e intervalos", () => {
     expect(cagedQualityToEngine("Maj7")).toBe("Maj7");
     expect(cagedQualityToEngine("dom7")).toBe("dom7");
     expect(cagedQualityToEngine("min")).toBe("min");
+  });
+
+  it("genera Shell en los sets de cuerdas 6-4-3 y 5-4-3", () => {
+    const voicings = buildArrangedVoicings("C", "shell_Maj7");
+    expect(voicings.some((voicing) => voicing.stringSet === "6-4-3")).toBe(true);
+    expect(voicings.some((voicing) => voicing.stringSet === "5-4-3")).toBe(true);
+    voicings.forEach((voicing) => expect(voicing.notes.map((note) => note.interval)).toEqual([0, 4, 11]));
+  });
+
+  it("Drop 2 baja la quinta una octava y usa cuatro cuerdas adyacentes", () => {
+    const voicing = buildArrangedVoicings("C", "drop2_Maj7").find((candidate) => candidate.stringSet === "6-5-4-3");
+    expect(voicing).toBeDefined();
+    expect(voicing?.droppedInterval).toBe(7);
+    expect(voicing?.notes.map((note) => note.interval)).toEqual([7, 0, 4, 11]);
+    expect(voicing?.notes.map((note) => note.midi)).toEqual([43, 48, 52, 59]);
+  });
+
+  it("Drop 3 baja la tercera una octava y usa cuerdas con salto", () => {
+    const voicing = buildArrangedVoicings("C", "drop3_min7").find((candidate) => candidate.stringSet === "6-4-3-2");
+    expect(voicing).toBeDefined();
+    expect(voicing?.droppedInterval).toBe(3);
+    expect(voicing?.notes.map((note) => note.midi).every((midi, index, notes) => index === 0 || midi > notes[index - 1])).toBe(true);
+    expect(voicing?.notes.some((note, index, notes) => index > 0 && note.string !== notes[index - 1].string - 1)).toBe(true);
   });
 });
 
