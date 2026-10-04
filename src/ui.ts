@@ -1,5 +1,5 @@
 import { ARPEGGIOS, CHORD_CATEGORIES, CHORD_GLOSSARY, CAGED_QUALITIES, CAGED_SHAPES, FRET_COUNT, NOTES, SCALES, STRINGS, type ArpeggioId, type CagedLayer, type CagedQuality, type CagedShape, type ChordGlossaryEntry, type ModuleId, type ScaleId } from "./data/data";
-import { buildChord, clampRange, findChordVoicings, findCagedBoxes, findCagedLayerMarks, findDiatonicDoubleStopPairs, findDoubleStopPairs, findMarks, findScaleMarks, findVoicingMarks, findVoicingsForIntervals, intervalLabel, noteAt, noteIndex, suggestNoteSets, type ChordBase, type ChordBuilderState, type ChordVoicing, type CagedWindow, type DiatonicDoubleStopInterval, type DoubleStopPair, type FretMark, type FretPosition, type NoteSetSuggestion, type Range, type ScaleSystem } from "./utils/domain";
+import { buildChord, clampRange, findChordVoicings, findCagedBoxes, findCagedLayerMarks, findDiatonicDoubleStopPairs, findDoubleStopPairs, findMarks, findScaleMarks, findVoicingMarks, findVoicingsForIntervals, intervalLabel, noteAt, noteIndex, suggestNoteSets, type ChordBase, type ChordBuilderState, type ChordVoicing, type CagedWindow, type DiatonicDoubleStopInterval, type DoubleStopStringPairGroup, type FretMark, type FretPosition, type NoteSetSuggestion, type Range, type ScaleSystem } from "./utils/domain";
 import { buildCagedVoicings, toRomanFret, type CagedPositionVoicing, type CagedTemplateQuality } from "./utils/chordEngine";
 import { mountCagedModule } from "./cagedModule";
 
@@ -78,13 +78,13 @@ function doubleStopControls(state: State, onChange: () => void): HTMLElement[] {
   return [field("Modo", mode), field("Intervalo", interval)];
 }
 
-function doubleStopPairsForState(state: State, range: Range): DoubleStopPair[] {
+function doubleStopPairsForState(state: State, range: Range): DoubleStopStringPairGroup[] {
   if (state.doubleStopMode === "diatonic") return findDiatonicDoubleStopPairs(state.root, state.diatonicDoubleStop, range);
   return findDoubleStopPairs(state.root, state.doubleStop, range);
 }
 
 function doubleStopStatus(state: State, range: Range): string {
-  const pairs = doubleStopPairsForState(state, range);
+  const pairs = doubleStopPairsForState(state, range).flatMap((group) => group.pairs);
   if (state.doubleStopMode === "fixed") {
     return pairs.length === 0
       ? `${state.root}: no hay parejas ascendentes de ${intervalLabel(state.doubleStop)} en este rango.`
@@ -485,10 +485,29 @@ function board(marks: FretMark[], range: Range, display: DisplayMode, cagedBoxes
   }
   wrapper.append(boardElement); return wrapper;
 }
+function diatonicDoubleStopSections(state: State, range: Range): HTMLElement[] {
+  const groups = findDiatonicDoubleStopPairs(state.root, state.diatonicDoubleStop, range)
+    .filter((group) => group.pairs.length > 0);
+  if (groups.length === 0) {
+    return [Object.assign(el("p", "empty-state"), { textContent: "No hay parejas diatónicas en este rango." })];
+  }
+  return groups.map((group) => {
+    const section = el("section", "double-stop-pair-section");
+    const heading = el("h3", "positions-title");
+    heading.textContent = `${group.stringPair[0] + 1}ª–${group.stringPair[1] + 1}ª cuerda`;
+    const uniqueMarks = new Map<string, FretMark>();
+    group.pairs.forEach(({ root, interval }) => {
+      uniqueMarks.set(`${root.stringIndex}:${root.fret}`, root);
+      uniqueMarks.set(`${interval.stringIndex}:${interval.fret}`, interval);
+    });
+    section.append(heading, board([...uniqueMarks.values()], range, state.display));
+    return section;
+  });
+}
 function renderBoard(state: State): HTMLElement {
   const range = clampRange(state.start, state.end); let marks: FretMark[];
   if (state.module === "ds") {
-    const pairs = doubleStopPairsForState(state, range);
+    const pairs = doubleStopPairsForState(state, range).flatMap((group) => group.pairs);
     const uniqueMarks = new Map<string, FretMark>();
     pairs.forEach(({ root, interval }) => {
       uniqueMarks.set(`${root.stringIndex}:${root.fret}`, root);
@@ -530,7 +549,9 @@ export function mountApp(root: HTMLElement): void {
       content.append(theory);
     }
     content.append(legend(state.module === "ds"));
-    content.append(renderBoard(state));
+    if (state.module === "ds" && state.doubleStopMode === "diatonic") {
+      content.append(...diatonicDoubleStopSections(state, clampRange(state.start, state.end)));
+    } else content.append(renderBoard(state));
     const status = el("p", "status");
     let moduleLabel = "mapa de notas";
     if (state.module === "esc") moduleLabel = SCALES[state.scale].label;

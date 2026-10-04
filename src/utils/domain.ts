@@ -16,6 +16,11 @@ export interface DoubleStopPair {
   degree?: number;
 }
 export type DiatonicDoubleStopInterval = "2nd" | "3rd" | "4th" | "5th" | "6th" | "7th";
+export type DoubleStopStringPattern = "adjacent" | "skip-one";
+export interface DoubleStopStringPairGroup {
+  stringPair: [number, number];
+  pairs: DoubleStopPair[];
+}
 
 interface DiatonicIntervalDefinition {
   distance: number;
@@ -23,6 +28,10 @@ interface DiatonicIntervalDefinition {
 }
 
 const MAJOR_SCALE_STEPS = [0, 2, 4, 5, 7, 9, 11] as const;
+const DIATONIC_DEFAULT_STRING_PATTERN: Record<DiatonicDoubleStopInterval, DoubleStopStringPattern> = {
+  "2nd": "adjacent", "3rd": "adjacent", "4th": "adjacent", "5th": "adjacent",
+  "6th": "skip-one", "7th": "skip-one",
+};
 const DIATONIC_DOUBLE_STOP_INTERVALS: Record<DiatonicDoubleStopInterval, readonly DiatonicIntervalDefinition[]> = {
   "2nd": [
     { distance: 2, quality: "2ª mayor" }, { distance: 2, quality: "2ª mayor" },
@@ -663,56 +672,73 @@ function intervalQualityForDistance(distance: number): string {
   return names[distance] ?? `${distance} semitonos`;
 }
 
+function stringPairsForPattern(pattern: DoubleStopStringPattern): Array<[number, number]> {
+  return pattern === "adjacent"
+    ? Array.from({ length: 5 }, (_, index): [number, number] => [index, index + 1])
+    : Array.from({ length: 4 }, (_, index): [number, number] => [index, index + 2]);
+}
+
 function searchDoubleStopPairs(
   root: string,
   distance: number,
   intervalQuality: string,
   range: Range,
+  pattern: DoubleStopStringPattern,
   degree?: number,
-): DoubleStopPair[] {
+): DoubleStopStringPairGroup[] {
   const rootIndex = noteIndex(root);
   if (rootIndex < 0 || !Number.isInteger(distance) || distance <= 0 || distance >= NOTES.length) return [];
-  const pairs: DoubleStopPair[] = [];
-  for (let baseString = 1; baseString <= 5; baseString += 1) {
+  const stringPairs = stringPairsForPattern(pattern);
+  const groups: DoubleStopStringPairGroup[] = stringPairs.map((stringPair) => ({ stringPair, pairs: [] }));
+
+  groups.forEach(({ stringPair, pairs }) => {
+    const [companionString, baseString] = stringPair;
     for (let fret = range.start; fret <= range.end; fret += 1) {
       const rootPitch = OPEN_STRING_MIDI_STANDARD_TUNING[baseString] + fret;
       const baseDistance = (rootPitch - rootIndex + 12) % 12;
       if (baseDistance !== 0) continue;
-      [baseString - 1, baseString - 2].filter((stringIndex) => stringIndex >= 0).forEach((companionString) => {
-        for (let companionFret = range.start; companionFret <= range.end; companionFret += 1) {
-          const intervalPitch = OPEN_STRING_MIDI_STANDARD_TUNING[companionString] + companionFret;
-          if (intervalPitch - rootPitch !== distance) continue;
-          if (Math.abs(companionFret - fret) > 4 && fret !== 0 && companionFret !== 0) continue;
-          pairs.push({
-            root: { stringIndex: baseString, fret, note: noteAt(baseString, fret), interval: intervalLabel(baseDistance), kind: "root" },
-            interval: { stringIndex: companionString, fret: companionFret, note: noteAt(companionString, companionFret), interval: intervalLabel(distance), kind: "chord" },
-            distance,
-            intervalQuality,
-            ...(degree === undefined ? {} : { degree }),
-          });
-        }
-      });
+      for (let companionFret = range.start; companionFret <= range.end; companionFret += 1) {
+        const intervalPitch = OPEN_STRING_MIDI_STANDARD_TUNING[companionString] + companionFret;
+        if (intervalPitch - rootPitch !== distance) continue;
+        if (Math.abs(companionFret - fret) > 4 && fret !== 0 && companionFret !== 0) continue;
+        pairs.push({
+          root: { stringIndex: baseString, fret, note: noteAt(baseString, fret), interval: intervalLabel(baseDistance), kind: "root" },
+          interval: { stringIndex: companionString, fret: companionFret, note: noteAt(companionString, companionFret), interval: intervalLabel(distance), kind: "chord" },
+          distance,
+          intervalQuality,
+          ...(degree === undefined ? {} : { degree }),
+        });
+      }
     }
-  }
-  return pairs;
+  });
+  return groups;
 }
 
-export function findDoubleStopPairs(root: string, distance: number, range: Range): DoubleStopPair[] {
-  return searchDoubleStopPairs(root, distance, intervalQualityForDistance(distance), range);
+export function findDoubleStopPairs(
+  root: string,
+  distance: number,
+  range: Range,
+  pattern: DoubleStopStringPattern = "adjacent",
+): DoubleStopStringPairGroup[] {
+  return searchDoubleStopPairs(root, distance, intervalQualityForDistance(distance), range, pattern);
 }
 
 export function findDiatonicDoubleStopPairs(
   key: string,
   intervalType: DiatonicDoubleStopInterval,
   range: Range,
-): DoubleStopPair[] {
+  pattern: DoubleStopStringPattern = DIATONIC_DEFAULT_STRING_PATTERN[intervalType],
+): DoubleStopStringPairGroup[] {
   const keyIndex = noteIndex(key);
   const intervals = DIATONIC_DOUBLE_STOP_INTERVALS[intervalType];
   if (keyIndex < 0 || !intervals) return [];
-  return intervals.flatMap(({ distance, quality }, index) => {
+  const groups: DoubleStopStringPairGroup[] = stringPairsForPattern(pattern).map((stringPair) => ({ stringPair, pairs: [] }));
+  intervals.forEach(({ distance, quality }, index) => {
     const degreeRoot = NOTES[(keyIndex + MAJOR_SCALE_STEPS[index]) % NOTES.length];
-    return searchDoubleStopPairs(degreeRoot, distance, quality, range, index + 1);
+    const degreeGroups = searchDoubleStopPairs(degreeRoot, distance, quality, range, pattern, index + 1);
+    degreeGroups.forEach((group, groupIndex) => groups[groupIndex].pairs.push(...group.pairs));
   });
+  return groups;
 }
 
 export function findVoicingMarks(root: string, intervals: readonly number[], firstString: number, range: Range): FretMark[] {

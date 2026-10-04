@@ -13,12 +13,14 @@ describe("domain musical", () => {
   });
 
   it("genera parejas de double stops con la distancia ascendente exacta", () => {
-    const pairs = findDoubleStopPairs("C", 4, { start: 0, end: 12 });
+    const groups = findDoubleStopPairs("C", 4, { start: 0, end: 12 });
+    const pairs = groups.flatMap((group) => group.pairs);
     const openStringMidi = [64, 59, 55, 50, 45, 40];
     expect(pairs.length).toBeGreaterThan(0);
+    expect(groups.map((group) => group.stringPair)).toEqual([[0, 1], [1, 2], [2, 3], [3, 4], [4, 5]]);
     expect(pairs.every(({ root, interval }) => openStringMidi[interval.stringIndex] + interval.fret - openStringMidi[root.stringIndex] - root.fret === 4)).toBe(true);
-    expect(pairs).toContainEqual({
-      root: { stringIndex: 2, fret: 5, note: "C", interval: "1", kind: "root" },
+    expect(groups[0].pairs).toContainEqual({
+      root: { stringIndex: 1, fret: 1, note: "C", interval: "1", kind: "root" },
       interval: { stringIndex: 0, fret: 0, note: "E", interval: "3", kind: "chord" },
       distance: 4,
       intervalQuality: "3ª mayor",
@@ -26,21 +28,32 @@ describe("domain musical", () => {
   });
 
   it("encuentra tercera menor en el II y tercera mayor en el IV de C mayor", () => {
-    const pairs = findDiatonicDoubleStopPairs("C", "3rd", { start: 0, end: 12 });
+    const groups = findDiatonicDoubleStopPairs("C", "3rd", { start: 0, end: 12 });
+    const pairs = groups.flatMap((group) => group.pairs);
+    expect(groups.map((group) => group.stringPair)).toEqual([[0, 1], [1, 2], [2, 3], [3, 4], [4, 5]]);
     const secondDegree = pairs.find((pair) => pair.degree === 2 && pair.root.note === "D");
     const fourthDegree = pairs.find((pair) => pair.degree === 4 && pair.root.note === "F");
     expect(secondDegree).toMatchObject({ distance: 3, intervalQuality: "3ª menor" });
     expect(fourthDegree).toMatchObject({ distance: 4, intervalQuality: "3ª mayor" });
+    expect(groups[0].pairs.some((pair) => pair.degree === 2 && pair.intervalQuality === "3ª menor")).toBe(true);
   });
 
   it("encuentra sexta mayor de 9 semitonos en el II de C mayor", () => {
-    const pairs = findDiatonicDoubleStopPairs("C", "6th", { start: 0, end: 12 });
-    const secondDegree = pairs.find((pair) => pair.degree === 2 && pair.root.note === "D");
+    const groups = findDiatonicDoubleStopPairs("C", "6th", { start: 0, end: 12 });
+    expect(groups.map((group) => group.stringPair)).toEqual([[0, 2], [1, 3], [2, 4], [3, 5]]);
+    const secondDegree = groups[1].pairs.find((pair) => pair.degree === 2 && pair.root.note === "D");
     expect(secondDegree).toMatchObject({ distance: 9, intervalQuality: "6ª mayor" });
   });
 
+  it("permite solicitar explícitamente patrones adjacent y skip-one", () => {
+    expect(findDoubleStopPairs("C", 4, { start: 0, end: 12 }, "skip-one").map((group) => group.stringPair))
+      .toEqual([[0, 2], [1, 3], [2, 4], [3, 5]]);
+    expect(findDiatonicDoubleStopPairs("C", "3rd", { start: 0, end: 12 }, "skip-one").map((group) => group.stringPair))
+      .toEqual([[0, 2], [1, 3], [2, 4], [3, 5]]);
+  });
+
   it("no acepta como tercera mayor una nota al aire que queda debajo de la raíz", () => {
-    const pairs = findDoubleStopPairs("C", 4, { start: 0, end: 24 });
+    const pairs = findDoubleStopPairs("C", 4, { start: 0, end: 24 }).flatMap((group) => group.pairs);
     expect(pairs).not.toContainEqual(expect.objectContaining({
       root: expect.objectContaining({ stringIndex: 2, fret: 17, note: "C" }),
       interval: expect.objectContaining({ stringIndex: 0, fret: 0, note: "E" }),
