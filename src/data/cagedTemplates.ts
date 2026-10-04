@@ -21,6 +21,8 @@
 
 import { TUNING } from "./data";
 
+export type FingerNumber = 1 | 2 | 3 | 4;
+
 /** Un punto de la digitación CAGED expresado en coordenadas relativas al ancla. */
 export interface CagedNote {
   /** Índice de cuerda: 0 = 1ª (e), 5 = 6ª (E) */
@@ -29,8 +31,8 @@ export interface CagedNote {
   relativeFret: number;
   /** Función interválica del punto (0 = raíz, 4 = 3ª M, 7 = 5ª J, 10 = b7, 11 = 7M, 3 = b3, etc.) */
   interval: number;
-  /** Dedo sugerido: 1 índice · 2 corazón · 3 anular · 4 meñique · 0 cejilla */
-  finger: number;
+  /** Dedo anatómico (1–4); las cuerdas al aire usan fret 0 y las cejillas se describen aparte. */
+  finger: FingerNumber;
 }
 
 /** Cejilla opcional de la forma: describe la cápsula gráfica. */
@@ -44,6 +46,43 @@ export interface CagedBarre {
   finger: 1;
 }
 
+/** Recorta una cejilla en cuerdas al aire, muteadas o ausentes de la digitación. */
+export function clipCagedBarre(
+  barre: CagedBarre | undefined,
+  anchorFret: number,
+  notes: readonly { string: number; fret: number }[],
+  mutedStrings: readonly number[],
+): CagedBarre | undefined {
+  if (!barre || anchorFret + barre.relativeFret <= 0) return undefined;
+  const noteByString = new Map(notes.map((note) => [note.string, note]));
+  let best: { fromString: number; toString: number; length: number } | undefined;
+  let segmentStart: number | undefined;
+  let segmentEnd: number | undefined;
+  const saveSegment = (): void => {
+    if (segmentStart === undefined || segmentEnd === undefined) return;
+    const length = segmentStart - segmentEnd + 1;
+    if (length >= 2 && (!best || length > best.length)) best = { fromString: segmentStart, toString: segmentEnd, length };
+    segmentStart = undefined;
+    segmentEnd = undefined;
+  };
+
+  for (let string = barre.fromString; string >= barre.toString; string -= 1) {
+    const note = noteByString.get(string);
+    const canBarre = Boolean(note)
+      && !mutedStrings.includes(string)
+      && note!.fret > 0
+      && note!.fret >= anchorFret + barre.relativeFret;
+    if (!canBarre) {
+      saveSegment();
+      continue;
+    }
+    segmentStart ??= string;
+    segmentEnd = string;
+  }
+  saveSegment();
+  return best ? { ...barre, fromString: best.fromString, toString: best.toString } : undefined;
+}
+
 export interface CagedTemplate {
   shape: "C" | "A" | "G" | "E" | "D";
   /** Índice de cuerda donde cae la nota raíz principal */
@@ -55,8 +94,12 @@ export interface CagedTemplate {
   major: CagedNote[];
   /** Puntos de triada menor (solo los que difieren de major) */
   minorOverrides: Partial<CagedNote>[];
+  /** Digitación menor completa cuando difiere estructuralmente de la forma mayor. */
+  minorShape?: CagedNote[];
   /** Barré si aplica */
   barre?: CagedBarre;
+  /** Barré específico de la digitación menor. */
+  minorBarre?: CagedBarre;
   /** Cuerdas mudas para la forma en posición abierta (array de índices) */
   muted: number[];
 }
@@ -66,6 +109,7 @@ export type CagedQuality = "major" | "minor" | "dom7" | "Maj7" | "min7";
 export interface ResolvedCagedShape {
   notes: Array<{ string: number; fret: number; interval: number; finger: number }>;
   complete: boolean;
+  barre?: CagedBarre;
 }
 
 // ─── Forma C ──────────────────────────────────────────────────
@@ -79,16 +123,19 @@ const SHAPE_C: CagedTemplate = {
   major: [
     { string: 4, relativeFret:  0, interval: 0, finger: 3 }, // raíz 5ª (ancla)
     { string: 3, relativeFret: -1, interval: 4, finger: 2 }, // 3M en 4ª cuerda
-    { string: 2, relativeFret: -3, interval: 7, finger: 0 }, // 5ª en 3ª cuerda
+    { string: 2, relativeFret: -3, interval: 7, finger: 1 }, // 5ª en 3ª cuerda
     { string: 1, relativeFret: -2, interval: 0, finger: 1 }, // raíz en 2ª cuerda
-    { string: 0, relativeFret: -3, interval: 4, finger: 0 }, // 3M en 1ª cuerda
+    { string: 0, relativeFret: -3, interval: 4, finger: 1 }, // 3M en 1ª cuerda
   ],
   minorOverrides: [
+    { string: 4, finger: 1 },
     { string: 3, relativeFret: 2, interval: 7, finger: 3 },
-    { string: 2, relativeFret: 2, interval: 0, finger: 4 },
+    { string: 2, relativeFret: 2, interval: 0, finger: 3 },
     { string: 1, relativeFret: 1, interval: 3, finger: 2 },
     { string: 0, relativeFret: 0, interval: 7, finger: 1 },
   ],
+  barre: { relativeFret: -3, fromString: 2, toString: 0, finger: 1 },
+  minorBarre: { relativeFret: 0, fromString: 4, toString: 0, finger: 1 },
   muted: [5],
 };
 
@@ -103,9 +150,9 @@ const SHAPE_A: CagedTemplate = {
   major: [
     { string: 4, relativeFret: 0, interval: 0, finger: 1 }, // raíz 5ª (ancla)
     { string: 3, relativeFret: 2, interval: 7, finger: 3 }, // 5ª en 4ª
-    { string: 2, relativeFret: 2, interval: 0, finger: 4 }, // raíz en 3ª
+    { string: 2, relativeFret: 2, interval: 0, finger: 3 }, // raíz en 3ª
     { string: 1, relativeFret: 2, interval: 4, finger: 3 }, // 3M en 2ª
-    { string: 0, relativeFret: 0, interval: 7, finger: 0 }, // 5ª en 1ª
+    { string: 0, relativeFret: 0, interval: 7, finger: 1 }, // 5ª bajo la cejilla
   ],
   minorOverrides: [
     { string: 1, relativeFret: 1, interval: 3, finger: 2 }, // b3 en 2ª cuerda
@@ -124,17 +171,24 @@ const SHAPE_G: CagedTemplate = {
   windowStart: -3,
   windowEnd: 2,
   major: [
-    { string: 5, relativeFret: 0, interval: 0, finger: 1 }, // raíz 6ª (ancla)
-    { string: 4, relativeFret: 2, interval: 7, finger: 3 }, // 5ª en 5ª cuerda
-    { string: 3, relativeFret: 2, interval: 0, finger: 4 }, // raíz en 4ª cuerda
-    { string: 2, relativeFret: 1, interval: 4, finger: 2 }, // 3M en 3ª cuerda
-    { string: 1, relativeFret: 0, interval: 7, finger: 0 }, // 5ª; ajuste de afinacion G-B
-    { string: 0, relativeFret: 0, interval: 0, finger: 1 }, // raíz en 1ª cuerda
+    { string: 5, relativeFret: 0, interval: 0, finger: 3 }, // raíz 6ª, G en traste 3
+    { string: 4, relativeFret: -1, interval: 4, finger: 2 }, // 3M, B en traste 2
+    { string: 3, relativeFret: -3, interval: 7, finger: 1 }, // 5ª, D al aire / cejilla al mover
+    { string: 2, relativeFret: -3, interval: 0, finger: 1 }, // raíz, G al aire / cejilla al mover
+    { string: 1, relativeFret: -3, interval: 4, finger: 1 }, // 3M, B al aire / cejilla al mover
+    { string: 0, relativeFret: 0, interval: 0, finger: 4 }, // raíz 1ª, G en traste 3
   ],
-  minorOverrides: [
-    { string: 2, relativeFret: 0, interval: 3, finger: 1 }, // b3 en 3ª cuerda
-    { string: 1, relativeFret: 0, interval: 7, finger: 0 }, // 5ª; ajuste de afinacion G-B
+  minorOverrides: [],
+  minorShape: [
+    { string: 5, relativeFret: 0, interval: 0, finger: 1 }, // raíz
+    { string: 4, relativeFret: 2, interval: 7, finger: 3 }, // 5ª con dedo 3
+    { string: 3, relativeFret: 2, interval: 0, finger: 4 }, // raíz con dedo 4
+    { string: 2, relativeFret: 0, interval: 3, finger: 1 }, // b3 bajo la cejilla
+    { string: 1, relativeFret: 0, interval: 7, finger: 1 }, // 5ª bajo la cejilla
+    { string: 0, relativeFret: 0, interval: 0, finger: 1 }, // raíz bajo la cejilla
   ],
+  barre: { relativeFret: -3, fromString: 3, toString: 1, finger: 1 },
+  minorBarre: { relativeFret: 0, fromString: 5, toString: 0, finger: 1 },
   muted: [],
 };
 
@@ -151,8 +205,8 @@ const SHAPE_E: CagedTemplate = {
     { string: 4, relativeFret: 2, interval: 7,  finger: 3 }, // 5ª en 5ª
     { string: 3, relativeFret: 2, interval: 0,  finger: 4 }, // raíz en 4ª
     { string: 2, relativeFret: 1, interval: 4,  finger: 2 }, // 3M en 3ª cuerda
-    { string: 1, relativeFret: 0, interval: 7,  finger: 0 }, // 5ª en 2ª cuerda
-    { string: 0, relativeFret: 0, interval: 0,  finger: 0 }, // raíz en 1ª cuerda
+    { string: 1, relativeFret: 0, interval: 7,  finger: 1 }, // 5ª bajo la cejilla
+    { string: 0, relativeFret: 0, interval: 0,  finger: 1 }, // raíz bajo la cejilla
   ],
   minorOverrides: [
     { string: 2, relativeFret: 0, interval: 3, finger: 1 }, // b3
@@ -171,13 +225,13 @@ const SHAPE_D: CagedTemplate = {
   windowStart: 0,
   windowEnd: 4,
   major: [
-    { string: 3, relativeFret: 0, interval: 0, finger: 0 }, // raíz 4ª (ancla, al aire si D)
-    { string: 2, relativeFret: 2, interval: 7, finger: 2 }, // 5ª en 3ª
-    { string: 1, relativeFret: 3, interval: 0, finger: 3 }, // raíz 2ª; ajuste de afinacion G-B
-    { string: 0, relativeFret: 2, interval: 4, finger: 1 }, // 3M en 1ª
+    { string: 3, relativeFret: 0, interval: 0, finger: 1 }, // raíz 4ª
+    { string: 2, relativeFret: 2, interval: 7, finger: 3 }, // 5ª en 3ª
+    { string: 1, relativeFret: 3, interval: 0, finger: 4 }, // raíz 2ª
+    { string: 0, relativeFret: 2, interval: 4, finger: 2 }, // 3M en 1ª
   ],
   minorOverrides: [
-    { string: 0, relativeFret: 1, interval: 3, finger: 1 }, // b3
+    { string: 0, relativeFret: 1, interval: 3, finger: 2 }, // b3
   ],
   muted: [5, 4], // cuerdas 6ª y 5ª silenciadas
 };
@@ -209,9 +263,13 @@ export function resolveCagedShape(
 ): ResolvedCagedShape {
   const anchor = computeAnchorFret(rootPitch, template, octaveShift);
   let shape = template.major.map((note) => ({ ...note }));
+  let barre = template.barre;
 
   if (quality === "minor" || quality === "min7") {
-    shape = applyOverrides(shape, template.minorOverrides);
+    shape = template.minorShape
+      ? template.minorShape.map((note) => ({ ...note }))
+      : applyOverrides(shape, template.minorOverrides);
+    barre = template.minorBarre ?? barre;
   }
   if (quality === "dom7" || quality === "Maj7" || quality === "min7") {
     const fretDrop = quality === "Maj7" ? 1 : 2;
@@ -229,7 +287,7 @@ export function resolveCagedShape(
     }))
     .filter((note) => note.fret >= 0 && note.fret <= 24);
 
-  return { notes, complete: playable.complete && notes.length === shape.length };
+  return { notes, complete: playable.complete && notes.length === shape.length, barre };
 }
 
 export function resolveCagedNotes(

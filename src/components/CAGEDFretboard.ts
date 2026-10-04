@@ -107,13 +107,14 @@ interface FretboardLayout {
 
 function appendHeader(layout: FretboardLayout): void {
   const { svg, svgW, svgH, chordName, voicing } = layout;
+  const positionName = voicing.displayName ?? `Forma ${voicing.shape}`;
   const background = svgEl("rect");
   setAttrs(background, { x: 0, y: 0, width: svgW, height: svgH, fill: COLORS.bg, rx: 12 });
   svg.append(background);
 
   const title = svgEl("text");
   setAttrs(title, { x: LAYOUT.leftMargin, y: 18, fill: COLORS.nut, "font-size": 14, "font-weight": "bold", "font-family": "Inter,system-ui,sans-serif" });
-  title.textContent = `${chordName}  ·  Forma ${voicing.shape}`;
+  title.textContent = `${chordName}  ·  ${positionName}`;
   svg.append(title);
 
   const position = svgEl("text");
@@ -251,7 +252,14 @@ function appendBarre(layout: FretboardLayout): void {
 }
 
 function noteText(finger: number, interval: number, isRoot: boolean, mode: LabelMode): string {
-  if (mode === "interval") return intervalLabel(interval).split("(")[0].trim().substring(0, 3);
+  if (mode === "interval") {
+    if (isRoot) return "R";
+    const intervalLabels: Record<number, string> = {
+      1: "b2", 2: "2", 3: "b3", 4: "3", 5: "4", 6: "b5",
+      7: "5", 8: "#5", 9: "6", 10: "b7", 11: "7",
+    };
+    return intervalLabels[interval] ?? intervalLabel(interval);
+  }
   if (mode === "note") return String(finger);
   if (finger > 0) return String(finger);
   return isRoot ? "T" : "0";
@@ -303,7 +311,7 @@ export function renderCAGEDFretboard(
   container: HTMLElement,
   options: CAGEDFretboardOptions,
 ): SVGElement {
-  const { voicing, chordName, fretWindow = 5, labelMode = "finger", onExportSVG } = options;
+  const { voicing, chordName, fretWindow = 5, labelMode = "interval", onExportSVG } = options;
   const frettedNotes = voicing.notes.filter((note) => note.fret > 0);
   const lowestFret = frettedNotes.length > 0 ? Math.min(...frettedNotes.map((note) => note.fret)) : 1;
   const startFret = Math.max(1, lowestFret);
@@ -313,7 +321,8 @@ export function renderCAGEDFretboard(
   const svg = svgEl("svg");
   setAttrs(svg, { width: svgW, height: svgH, viewBox: `0 0 ${svgW} ${svgH}`, xmlns: SVG_NS });
   svg.setAttribute("role", "img");
-  svg.setAttribute("aria-label", `Diagrama CAGED - Forma ${voicing.shape} - ${chordName}`);
+  const positionName = voicing.displayName ?? `Forma ${voicing.shape}`;
+  svg.setAttribute("aria-label", `Diagrama CAGED - ${positionName} - ${chordName}`);
   svg.style.cssText = "display:block;max-width:100%;border-radius:12px;overflow:hidden;";
 
   const layout: FretboardLayout = {

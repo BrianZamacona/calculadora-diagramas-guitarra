@@ -1,5 +1,5 @@
 import { ARPEGGIOS, CHORD_CATEGORIES, CHORD_GLOSSARY, CAGED_QUALITIES, CAGED_SHAPES, FRET_COUNT, NOTES, SCALES, STRINGS, type ArpeggioId, type CagedLayer, type CagedQuality, type CagedShape, type ChordGlossaryEntry, type ModuleId, type ScaleId } from "./data/data";
-import { buildChord, clampRange, findChordVoicings, findCagedBoxes, findCagedLayerMarks, findDoubleStops, findMarks, findScaleMarks, findVoicingMarks, findVoicingsForIntervals, noteAt, suggestNoteSets, type ChordBase, type ChordBuilderState, type ChordVoicing, type CagedWindow, type FretMark, type FretPosition, type NoteSetSuggestion, type Range, type ScaleSystem } from "./utils/domain";
+import { buildChord, clampRange, findChordVoicings, findCagedBoxes, findCagedLayerMarks, findDoubleStopPairs, findMarks, findScaleMarks, findVoicingMarks, findVoicingsForIntervals, intervalLabel, noteAt, noteIndex, suggestNoteSets, type ChordBase, type ChordBuilderState, type ChordVoicing, type CagedWindow, type FretMark, type FretPosition, type NoteSetSuggestion, type Range, type ScaleSystem } from "./utils/domain";
 import { buildCagedVoicings, toRomanFret, type CagedPositionVoicing, type CagedTemplateQuality } from "./utils/chordEngine";
 import { mountCagedModule } from "./cagedModule";
 
@@ -53,9 +53,10 @@ function rangeControls(state: State): HTMLElement {
   const separator = el("span"); separator.textContent = "a"; const end = el("input"); end.type = "number"; end.min = "3"; end.max = String(FRET_COUNT); end.value = String(state.end); end.dataset.range = "end"; wrapper.append(start, separator, end); return wrapper;
 }
 const LEGEND_ITEMS: ReadonlyArray<[FretMark["kind"], string]> = [["root", "Raíz"], ["chord", "Nota del acorde"], ["scale", "Nota de la escala"], ["blue", "Blue note"]];
-function legend(): HTMLElement {
+function legend(isDoubleStop = false): HTMLElement {
   const wrapper = el("div", "legend"); wrapper.setAttribute("role", "note"); wrapper.setAttribute("aria-label", "Significado de los colores en el mástil");
-  LEGEND_ITEMS.forEach(([kind, label]) => { const item = el("span", "legend-item"); const swatch = el("span", `legend-swatch ${kind}`); const text = el("span"); text.textContent = label; item.append(swatch, text); wrapper.append(item); });
+  const items = isDoubleStop ? [["root", "Raíz"], ["chord", "Intervalo elegido"]] as const : LEGEND_ITEMS;
+  items.forEach(([kind, label]) => { const item = el("span", "legend-item"); const swatch = el("span", `legend-swatch ${kind}`); const text = el("span"); text.textContent = label; item.append(swatch, text); wrapper.append(item); });
   return wrapper;
 }
 function infoBlock(title: string, paragraphs: readonly string[]): HTMLElement {
@@ -321,7 +322,13 @@ function libraryVoicingTitle(voicing: ChordVoicing): string {
   if (voicing.baseFret === 0) return voicing.title;
   return voicing.title.replace(/(traste\s+)(\d+)/i, (_match, label: string, fret: string) => `${label}${toRomanFret(Number(fret))}`);
 }
-function fingeringDiagram(fingering: ChordVoicing, root: string): HTMLElement {
+function fingeringNoteLabel(mode: "finger" | "interval", note: string, root: string, finger: number): string {
+  if (mode === "finger") return String(finger || "");
+  if (note === root) return "R";
+  const semitoneDistance = (noteIndex(note) - noteIndex(root) + NOTES.length) % NOTES.length;
+  return intervalLabel(semitoneDistance);
+}
+function fingeringDiagram(fingering: ChordVoicing, root: string, labelMode: "finger" | "interval" = "finger"): HTMLElement {
   const card = el("article", "chord-diagram-card"); const title = el("h3"); title.textContent = libraryVoicingTitle(fingering); card.append(title);
   const frets = fingering.fretPositions; const fretted = frets.filter((fret): fret is number => typeof fret === "number" && fret > 0); const maxFret = Math.max(1, ...fretted); const minFret = Math.max(1, fingering.baseFret);
   const diagram = el("div", "fingering-diagram"); diagram.style.gridTemplateColumns = "repeat(6, 34px)";
@@ -338,7 +345,7 @@ function fingeringDiagram(fingering: ChordVoicing, root: string): HTMLElement {
       diagram.append(bar);
     }
   }
-  for (let fret = minFret; fret <= Math.max(minFret + 3, maxFret); fret += 1) { [5, 4, 3, 2, 1, 0].forEach((stringIndex) => { const cell = el("div", "fingering-cell"); if (frets[stringIndex] === fret) { const dot = el("span", `diagram-note ${noteAt(stringIndex, fret) === root ? "root" : ""}`); dot.textContent = String(fingering.fingerPositions[stringIndex] || ""); dot.setAttribute("aria-label", `${noteAt(stringIndex, fret)}, dedo ${fingering.fingerPositions[stringIndex]}`); cell.append(dot); } diagram.append(cell); }); }
+  for (let fret = minFret; fret <= Math.max(minFret + 3, maxFret); fret += 1) { [5, 4, 3, 2, 1, 0].forEach((stringIndex) => { const cell = el("div", "fingering-cell"); if (frets[stringIndex] === fret) { const note = noteAt(stringIndex, fret); const isRoot = note === root; const label = fingeringNoteLabel(labelMode, note, root, fingering.fingerPositions[stringIndex]); const dot = el("span", `diagram-note ${isRoot ? "root" : ""}`); dot.textContent = label; dot.setAttribute("aria-label", labelMode === "interval" ? `${note}, intervalo ${label}` : `${note}, dedo ${fingering.fingerPositions[stringIndex]}`); cell.append(dot); } diagram.append(cell); }); }
   card.append(diagram); return card;
 }
 function fretMarkerText(fret: FretPosition): string {
@@ -372,9 +379,9 @@ function chordBuilderView(state: State, onChange: () => void): HTMLElement {
     const diagramsHeading = el("div", "diagrams-heading");
     const count = el("h3"); count.textContent = usesCaged ? `${voicings.length} formas CAGED` : voicingCountText(voicings.length);
     if (!usesCaged && voicings.length > 0) count.textContent += " · otras posiciones";
-    const caption = el("p", "diagrams-caption"); caption.textContent = "\"x\" = cuerda silenciada · \"o\" = cuerda al aire · el número indica el dedo (1 índice, 2 corazón, 3 anular, 4 meñique).";
+    const caption = el("p", "diagrams-caption"); caption.textContent = "\"x\" = cuerda silenciada · \"o\" = cuerda al aire · R = raíz · las etiquetas muestran intervalos.";
     diagramsHeading.append(count, caption); section.append(diagramsHeading);
-    const diagrams = el("div", "chord-diagrams"); voicings.forEach((fingering) => diagrams.append(fingeringDiagram(fingering, builder.root))); section.append(diagrams);
+    const diagrams = el("div", "chord-diagrams"); voicings.forEach((fingering) => diagrams.append(fingeringDiagram(fingering, builder.root, "interval"))); section.append(diagrams);
   }
   return section;
 }
@@ -437,7 +444,15 @@ function board(marks: FretMark[], range: Range, display: DisplayMode, cagedBoxes
 }
 function renderBoard(state: State): HTMLElement {
   const range = clampRange(state.start, state.end); let marks: FretMark[];
-  if (state.module === "ds") marks = findDoubleStops(state.root, state.doubleStop, range);
+  if (state.module === "ds") {
+    const pairs = findDoubleStopPairs(state.root, state.doubleStop, range);
+    const uniqueMarks = new Map<string, FretMark>();
+    pairs.forEach(({ root, interval }) => {
+      uniqueMarks.set(`${root.stringIndex}:${root.fret}`, root);
+      uniqueMarks.set(`${interval.stringIndex}:${interval.fret}`, interval);
+    });
+    marks = [...uniqueMarks.values()];
+  }
   else if (state.module === "arp") {
     if (state.arpeggioMode === "full") marks = findMarks(state.root, ARPEGGIOS[state.arpeggio].intervals, range);
     else marks = findVoicingMarks(state.root, ARPEGGIOS[state.arpeggio].intervals, state.arpeggioMode === "drop2-14" ? 0 : 1, range);
@@ -471,13 +486,18 @@ export function mountApp(root: HTMLElement): void {
       theory.append(construction, harmony);
       content.append(theory);
     }
-    content.append(legend());
+    content.append(legend(state.module === "ds"));
     content.append(renderBoard(state));
     const status = el("p", "status");
     let moduleLabel = "mapa de notas";
     if (state.module === "esc") moduleLabel = SCALES[state.scale].label;
     else if (state.module === "arp") moduleLabel = ARPEGGIOS[state.arpeggio].label;
-    status.textContent = `${state.root}: ${moduleLabel}.`;
+    if (state.module === "ds") {
+      const pairs = findDoubleStopPairs(state.root, state.doubleStop, clampRange(state.start, state.end));
+      status.textContent = pairs.length === 0
+        ? `${state.root}: no hay parejas ascendentes de ${intervalLabel(state.doubleStop)} en este rango.`
+        : `${state.root}: intervalo ${intervalLabel(state.doubleStop)} · ${pairs.length} parejas en este rango.`;
+    } else status.textContent = `${state.root}: ${moduleLabel}.`;
     content.append(status);
   };
   MODULES.forEach(({ id, label }) => {

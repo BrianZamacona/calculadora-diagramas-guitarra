@@ -12,9 +12,10 @@
  *  - Exportación SVG, PDF y MIDI
  */
 
-import { NOTES, type CagedQuality, type Note } from "./data/data";
+import { NOTES, TUNING, type CagedQuality, type Note } from "./data/data";
 import {
   buildCagedVoicings,
+  buildOptimalProgressionVoicings,
   buildProgressionChords,
   PROGRESSIONS,
   cagedTemplateQualityForChord,
@@ -23,6 +24,7 @@ import {
   type CagedPositionVoicing,
   type CagedShapeId,
   type AlternateShapeId,
+  type ProgressionVoicingStep,
 } from "./utils/chordEngine";
 import { renderCAGEDFretboard, exportSVGToFile } from "./components/CAGEDFretboard";
 import { playArpeggio, playStrum, stopAudio, setAudioBPM } from "./services/audio";
@@ -64,6 +66,50 @@ function selectEl(id: string, options: Array<[string, string]>, selected: string
   return s;
 }
 
+function progressionChordVoicing(step: ProgressionVoicingStep, shape: CagedShapeId): CagedPositionVoicing | undefined {
+  const { chord, voicing } = step;
+  const frets = voicing.fretPositions;
+  const rootPitch = NOTES.indexOf(chord.root as Note);
+  if (rootPitch < 0) return undefined;
+  const notes = frets.flatMap((fret, string) => {
+    if (fret === "x") return [];
+    return [{
+      string,
+      fret,
+      interval: (TUNING[string] + fret - rootPitch + 12) % 12,
+      finger: voicing.fingerPositions[string] ?? 0,
+    }];
+  });
+  const requiredIntervals = chord.quality.intervals.filter((interval) =>
+    !(chord.quality.intervals.length > 2 && interval === 7),
+  );
+  return {
+    shape,
+    displayName: "Voice leading",
+    anchorFret: voicing.baseFret,
+    notes,
+    complete: requiredIntervals.every((interval) => notes.some((note) => note.interval === interval)),
+    mutedStrings: frets.flatMap((fret, string) => fret === "x" ? [string] : []),
+    barre: voicing.barre,
+  };
+}
+
+function progressionVoiceLeadingOptions(state: CagedModuleState) {
+  return state.altShape === "none"
+    ? { includeTexturalAlternatives: false }
+    : { preferredTexture: state.altShape, includeTexturalAlternatives: false };
+}
+
+function progressionPathForState(state: CagedModuleState): ProgressionVoicingStep[] {
+  if (state.altShape === "none") return [];
+  return buildOptimalProgressionVoicings(state.tonic, state.progressionId, progressionVoiceLeadingOptions(state));
+}
+
+function requestedTexture(state: CagedModuleState): AlternateShapeId | undefined {
+  if (state.altShape === "none") return undefined;
+  return state.altShape;
+}
+
 // ─── Renderizador principal ─────────────────────────────────────
 
 export function mountCagedModule(container: HTMLElement): void {
@@ -72,7 +118,7 @@ export function mountCagedModule(container: HTMLElement): void {
     progressionId: "v1-1",
     cagedQuality: "Maj",
     altShape: "none",
-    labelMode: "finger",
+    labelMode: "interval",
     bpm: 80,
     selectedChordIdx: 0,
     selectedShapeIdx: 0,
@@ -80,6 +126,8 @@ export function mountCagedModule(container: HTMLElement): void {
 
   let currentVoicings: CagedPositionVoicing[] = [];
   let currentSVG: SVGElement | null = null;
+  let currentDiagramChordName: string = state.tonic;
+  let currentDiagramRoot: string = state.tonic;
 
   const activeShape = (): CagedShapeId => currentVoicings[state.selectedShapeIdx]?.shape ?? "E";
 
@@ -125,7 +173,7 @@ export function mountCagedModule(container: HTMLElement): void {
   altSel.addEventListener("change", () => { state.altShape = altSel.value as AlternateShapeId | "none"; redraw(); });
 
   // Etiquetas
-  const labelOptions: Array<[string, string]> = [["finger", "Dedos (1-4)"], ["interval", "Intervalos"]];
+  const labelOptions: Array<[string, string]> = [["interval", "Intervalos"], ["finger", "Dedos (1-4)"]];
   const labelSel = selectEl("caged-label-mode", labelOptions, state.labelMode);
   labelSel.addEventListener("change", () => { state.labelMode = labelSel.value as LabelMode; redraw(); });
 
@@ -212,11 +260,14 @@ export function mountCagedModule(container: HTMLElement): void {
   btnPDF.id = "btn-export-pdf";
   btnPDF.addEventListener("click", () => {
     if (!state.progressionId) return;
-    const progChords = buildProgressionChords(state.tonic, state.progressionId, state.altShape === "none" ? undefined : state.altShape, activeShape());
-    const chordData = progChords.map((chord) => ({
-      chord,
-      voicings: buildCagedVoicings(chord.root, cagedTemplateQualityForChord(chord.quality.id)),
-    }));
+    const path = progressionPathForState(state);
+    const chordData = path.length > 0
+      ? path.map((step) => {
+          const voicing = progressionChordVoicing(step, activeShape());
+          return { chord: step.chord, voicings: voicing ? [voicing] : [] };
+        })
+      : buildProgressionChords(state.tonic, state.progressionId, requestedTexture(state))
+          .map((chord) => ({ chord, voicings: buildCagedVoicings(chord.root, cagedTemplateQualityForChord(chord.quality.id)) }));
     const prog = PROGRESSIONS.find((p) => p.id === state.progressionId);
     exportProgressionPDF(prog?.label ?? state.progressionId, state.tonic, chordData);
   });
@@ -225,11 +276,16 @@ export function mountCagedModule(container: HTMLElement): void {
   btnMIDI.id = "btn-export-midi";
   btnMIDI.addEventListener("click", () => {
     if (!state.progressionId) return;
-    const progChords = buildProgressionChords(state.tonic, state.progressionId, state.altShape === "none" ? undefined : state.altShape, activeShape());
-    const midiData = progChords.map((chord) => ({
-      chord,
-      voicing: buildCagedVoicings(chord.root, cagedTemplateQualityForChord(chord.quality.id))[0],
-    })).filter((d) => d.voicing);
+    const path = progressionPathForState(state);
+    const midiData = path.length > 0
+      ? path.flatMap((step) => {
+          const voicing = progressionChordVoicing(step, activeShape());
+          return voicing ? [{ chord: step.chord, voicing }] : [];
+        })
+      : buildProgressionChords(state.tonic, state.progressionId, requestedTexture(state)).flatMap((chord) => {
+          const voicing = buildCagedVoicings(chord.root, cagedTemplateQualityForChord(chord.quality.id))[0];
+          return voicing ? [{ chord, voicing }] : [];
+        });
     exportProgressionMIDI(midiData, state.bpm, `progresion-${state.tonic}.mid`);
   });
   exportBar.append(btnSVG, btnPDF, btnMIDI);
@@ -240,16 +296,29 @@ export function mountCagedModule(container: HTMLElement): void {
     // Calcular voicings del acorde actual
     const quality = state.cagedQuality;
     currentVoicings = buildCagedVoicings(state.tonic, cagedTemplateQualityForSelection(quality));
+    currentDiagramChordName = state.tonic + (quality !== "Maj" ? quality : "");
+    currentDiagramRoot = state.tonic;
 
     // Renderizar panel de progresión
     progressionPanel.replaceChildren();
     if (state.progressionId) {
-      const progChords = buildProgressionChords(
-        state.tonic,
-        state.progressionId,
-        state.altShape !== "none" ? state.altShape : undefined,
-        activeShape(),
-      );
+      const progressionPath = progressionPathForState(state);
+      const progChords = progressionPath.length > 0
+        ? progressionPath.map((step) => step.chord)
+        : buildProgressionChords(state.tonic, state.progressionId, requestedTexture(state));
+      const selectedChord = progChords[state.selectedChordIdx];
+      if (selectedChord) {
+        currentDiagramChordName = selectedChord.name;
+        currentDiagramRoot = selectedChord.root;
+        const selectedStep = progressionPath[state.selectedChordIdx];
+        const voiceLeadingVoicing = selectedStep ? progressionChordVoicing(selectedStep, activeShape()) : undefined;
+        if (voiceLeadingVoicing) {
+          currentVoicings = [voiceLeadingVoicing];
+          state.selectedShapeIdx = 0;
+        } else {
+          currentVoicings = buildCagedVoicings(selectedChord.root, cagedTemplateQualityForChord(selectedChord.quality.id));
+        }
+      }
       if (progChords.length > 0) {
         const progTitle = el("h3", "progression-title");
         const prog = PROGRESSIONS.find((p) => p.id === state.progressionId);
@@ -262,10 +331,7 @@ export function mountCagedModule(container: HTMLElement): void {
           btn.id = `chord-pill-${idx}`;
           btn.addEventListener("click", () => {
             state.selectedChordIdx = idx;
-            // Actualizar voicings para este acorde de la progresión
-            currentVoicings = buildCagedVoicings(chord.root, cagedTemplateQualityForChord(chord.quality.id));
-            redrawDiagram();
-            chordBtns.querySelectorAll(".chord-pill").forEach((b, i) => b.classList.toggle("active", i === idx));
+            redraw();
           });
           chordBtns.append(btn);
         });
@@ -277,7 +343,7 @@ export function mountCagedModule(container: HTMLElement): void {
     shapeTabs.replaceChildren();
     currentVoicings.slice(0, 5).forEach((v, idx) => {
       const tab = el("button", `shape-tab${idx === state.selectedShapeIdx ? " active" : ""}`);
-      tab.textContent = `${v.shape} · T${toRomanFret(v.anchorFret)}`;
+      tab.textContent = `${v.displayName ?? v.shape} · T${toRomanFret(v.anchorFret)}`;
       tab.id = `shape-tab-${idx}`;
       tab.addEventListener("click", () => {
         state.selectedShapeIdx = idx;
@@ -300,8 +366,8 @@ export function mountCagedModule(container: HTMLElement): void {
 
     currentSVG = renderCAGEDFretboard(diagramArea, {
       voicing,
-      chordName: state.tonic + (state.cagedQuality !== "Maj" ? state.cagedQuality : ""),
-      rootNote: state.tonic,
+      chordName: currentDiagramChordName,
+      rootNote: currentDiagramRoot,
       labelMode: state.labelMode,
       fretWindow: 5,
     });

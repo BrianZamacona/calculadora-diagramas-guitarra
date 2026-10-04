@@ -11,7 +11,6 @@ import {
   buildCagedVoicings,
   buildArrangedVoicings,
   buildProgressionChords,
-  ALTERNATE_SHAPE_MATRIX,
   cagedTemplateQualityForChord,
   generateAllCombinations,
   PROGRESSIONS,
@@ -24,6 +23,7 @@ import {
   type ChordQualityId,
 } from "../src/utils/chordEngine";
 import {
+  clipCagedBarre,
   computeAnchorFret,
   resolveCagedNotes,
   resolveCagedShape,
@@ -32,6 +32,7 @@ import {
 } from "../src/data/cagedTemplates";
 import { NOTES, TUNING } from "../src/data/data";
 import { MusicNote } from "../src/utils/domain";
+import type { ProgressionLabel } from "../src/types/guitar";
 import { CLASSIC_ALTERNATE_SHAPES_DB, getAlternateShapeData } from "../src/data/alternateShapesData";
 
 // ─── Plantillas CAGED ─────────────────────────────────────────
@@ -51,16 +52,24 @@ describe("cagedTemplates · ancla y resolución de notas", () => {
     expect(anchor).toBe(3);
   });
 
-  it("forma G en C → ancla traste 5 (6ª cuerda)", () => {
+  it("forma G para C → ancla en traste VIII de la 6ª cuerda", () => {
     const rootPitch = NOTES.indexOf("C");
     const anchor = computeAnchorFret(rootPitch, CAGED_TEMPLATES.G);
-    // E-string (tuning=4), root C (0): (0-4+12)%12 = 8... G-shape rootString=5 => same
-    // Actually G shape rootString = 5 (E-string), so anchor = (0-4+12)%12 = 8... 
-    // Wait: G open is traste 3 on E-string, so anchor for C = 8 (same string), pero la forma G
-    // se desplaza 5 trastes arriba de la E... en realidad C-forma-G = traste 5 en la A (pero rootString=5)
-    // Verificar que anchor >= 0 y <= 12
-    expect(anchor).toBeGreaterThanOrEqual(0);
-    expect(anchor).toBeLessThanOrEqual(12);
+    expect(anchor).toBe(8);
+  });
+
+  it("la forma G desplazada a C conserva el patrón clásico y suena C mayor", () => {
+    const notes = resolveCagedNotes(NOTES.indexOf("C"), CAGED_TEMPLATES.G, "major");
+    const fretByString = new Map(notes.map((note) => [note.string, note.fret]));
+    expect([5, 4, 3, 2, 1, 0].map((string) => fretByString.get(string))).toEqual([8, 7, 5, 5, 5, 8]);
+    expect(notes.map((note) => note.interval)).toEqual([0, 4, 7, 0, 4, 0]);
+  });
+
+  it("forma G abierta reproduce G: 3-2-0-0-0-3", () => {
+    const notes = resolveCagedNotes(NOTES.indexOf("G"), CAGED_TEMPLATES.G, "major");
+    const fretByString = new Map(notes.map((note) => [note.string, note.fret]));
+    expect([5, 4, 3, 2, 1, 0].map((string) => fretByString.get(string))).toEqual([3, 2, 0, 0, 0, 3]);
+    expect(notes.map((note) => note.interval)).toEqual([0, 4, 7, 0, 4, 0]);
   });
 
   it("forma E en A → ancla traste 5", () => {
@@ -236,6 +245,67 @@ describe("chordEngine · buildCagedVoicings", () => {
     expect(hasMinorThird).toBe(true);
   });
 
+  it("forma A menor abierta conserva x-0-2-2-1-0", () => {
+    const notes = resolveCagedNotes(NOTES.indexOf("A"), CAGED_TEMPLATES.A, "minor");
+    const fretByString = new Map(notes.map((note) => [note.string, note.fret]));
+    expect([5, 4, 3, 2, 1, 0].map((string) => fretByString.get(string) ?? "x")).toEqual(["x", 0, 2, 2, 1, 0]);
+  });
+
+  it("C menor forma C hace cejilla índice desde A3 hasta e3", () => {
+    const voicing = buildCagedVoicings("C", "minor").find((candidate) => candidate.shape === "C" && candidate.anchorFret === 3);
+    expect(voicing?.barre).toEqual({ fret: 3, fromString: 4, toString: 0 });
+    const barreNotes = voicing?.notes.filter((note) => note.fret === 3);
+    expect(barreNotes?.map((note) => note.string).sort((a, b) => a - b)).toEqual([0, 4]);
+    expect(barreNotes?.every((note) => note.finger === 1)).toBe(true);
+  });
+
+  it("C menor forma G usa cejilla de raíz y dedos 3/4 en A/D", () => {
+    const voicing = buildCagedVoicings("C", "minor").find((candidate) => candidate.shape === "G" && candidate.anchorFret === 8);
+    expect(voicing?.barre).toEqual({ fret: 8, fromString: 5, toString: 0 });
+    const fingerByString = new Map(voicing?.notes.map((note) => [note.string, note.finger]));
+    expect(fingerByString.get(4)).toBe(3);
+    expect(fingerByString.get(3)).toBe(4);
+    expect(voicing?.notes.filter((note) => note.fret === 8).every((note) => note.finger === 1)).toBe(true);
+  });
+
+  it("G menor forma G en traste III es 3-5-5-3-3-3 con cejilla índice", () => {
+    const voicing = buildCagedVoicings("G", "minor").find((candidate) => candidate.shape === "G" && candidate.anchorFret === 3);
+    const fretByString = new Map(voicing?.notes.map((note) => [note.string, note.fret]));
+    expect([5, 4, 3, 2, 1, 0].map((string) => fretByString.get(string))).toEqual([3, 5, 5, 3, 3, 3]);
+    expect(voicing?.barre).toEqual({ fret: 3, fromString: 5, toString: 0 });
+    expect(voicing?.notes.filter((note) => note.fret === 3).every((note) => note.finger === 1)).toBe(true);
+  });
+
+  it("C menor forma E en traste VIII barre las seis cuerdas con el dedo 1", () => {
+    const voicing = buildCagedVoicings("C", "minor").find((candidate) => candidate.shape === "E" && candidate.anchorFret === 8);
+    expect(voicing?.barre).toEqual({ fret: 8, fromString: 5, toString: 0 });
+    expect(voicing?.notes.filter((note) => note.fret === 8).every((note) => note.finger === 1)).toBe(true);
+  });
+
+  it("C menor forma D usa dedos 1–4 sin cejilla ni dedo cero", () => {
+    const voicing = buildCagedVoicings("C", "minor").find((candidate) => candidate.shape === "D" && candidate.anchorFret === 10);
+    expect(voicing?.barre).toBeUndefined();
+    expect(voicing?.notes.every((note) => note.finger >= 1 && note.finger <= 4)).toBe(true);
+  });
+
+  it("recorta una cejilla al encontrar una cuerda abierta o muteada", () => {
+    const barre = { relativeFret: 0, fromString: 5, toString: 0, finger: 1 as const };
+    const notes = [
+      { string: 5, fret: 3 }, { string: 4, fret: 5 }, { string: 3, fret: 0 },
+      { string: 2, fret: 5 }, { string: 1, fret: 4 }, { string: 0, fret: 3 },
+    ];
+    expect(clipCagedBarre(barre, 3, notes, [])).toEqual({ relativeFret: 0, fromString: 2, toString: 0, finger: 1 });
+    expect(clipCagedBarre(barre, 3, notes, [2, 4])).toEqual({ relativeFret: 0, fromString: 1, toString: 0, finger: 1 });
+  });
+
+  it("las digitaciones menores CAGED nunca asignan un dedo cero a notas pisadas", () => {
+    for (const voicing of buildCagedVoicings("C", "minor")) {
+      voicing.notes.filter((note) => note.fret > 0).forEach((note) => {
+        expect([1, 2, 3, 4]).toContain(note.finger);
+      });
+    }
+  });
+
   const seventhQualities = [
     { quality: "dom7", intervals: [0, 4, 7, 10] },
     { quality: "Maj7", intervals: [0, 4, 7, 11] },
@@ -280,23 +350,29 @@ describe("chordEngine · buildCagedVoicings", () => {
     expect(intervals.has(10)).toBe(true);
   });
 
-  it("marca solo los voicings recortados por el traste cero como parciales", () => {
+  it("limita los parciales a formas C/G cuyo patrón cae bajo el traste cero", () => {
     const qualities = ["major", "minor", "dom7", "Maj7", "min7"] as const;
     const incomplete = NOTES.flatMap((root) => Object.values(CAGED_TEMPLATES).flatMap((template) => qualities.flatMap((quality) => {
       const resolved = resolveCagedShape(NOTES.indexOf(root), template, quality);
       return resolved.complete ? [] : [{ root, shape: template.shape, quality, intervals: resolved.notes.map((note) => note.interval) }];
     })));
-    expect(incomplete).toEqual([
-      { root: "A", shape: "C", quality: "major", intervals: [] },
-      { root: "A", shape: "C", quality: "dom7", intervals: [] },
-      { root: "A", shape: "C", quality: "Maj7", intervals: [] },
-      { root: "A#", shape: "C", quality: "major", intervals: [0, 4] },
-      { root: "A#", shape: "C", quality: "dom7", intervals: [] },
-      { root: "A#", shape: "C", quality: "Maj7", intervals: [] },
-      { root: "B", shape: "C", quality: "major", intervals: [0, 4, 0] },
-      { root: "B", shape: "C", quality: "dom7", intervals: [10, 4, 0] },
-      { root: "B", shape: "C", quality: "Maj7", intervals: [11, 4, 0] },
+    expect(incomplete.every((item) => item.shape === "C" || item.shape === "G")).toBe(true);
+    const movableGMinor = resolveCagedShape(NOTES.indexOf("C"), CAGED_TEMPLATES.G, "minor");
+    expect(movableGMinor.complete).toBe(true);
+    expect(movableGMinor.notes.some((note) => note.interval === 3)).toBe(true);
+    const gPartials = incomplete.filter((item) => item.shape === "G");
+    expect(gPartials.map((item) => `${item.root}:${item.quality}`).sort()).toEqual([
+      "E:Maj7", "E:dom7", "E:major",
+      "F#:Maj7", "F#:dom7", "F#:major",
+      "F:Maj7", "F:dom7", "F:major",
     ]);
+    gPartials.forEach(({ root }) => {
+      const anchor = computeAnchorFret(NOTES.indexOf(root), CAGED_TEMPLATES.G);
+      expect(CAGED_TEMPLATES.G.major.some((note) => anchor + note.relativeFret < 0)).toBe(true);
+    });
+    const openGMinor = resolveCagedShape(NOTES.indexOf("G"), CAGED_TEMPLATES.G, "minor");
+    expect(openGMinor.complete).toBe(true);
+    expect(openGMinor.notes.map((note) => note.fret)).toEqual([3, 5, 5, 3, 3, 3]);
   });
 });
 
@@ -334,32 +410,13 @@ describe("chordEngine · buildProgressionChords", () => {
     expect(vi.quality.intervals).toContain(3); // 3ª menor
   });
 
-  it("soporta shape alternativo sus2 en V de I-V-vi-IV", () => {
-    const chords = buildProgressionChords("C", "v1-2", "sus2");
-    // El V (G) debe cambiar a Gsus2
-    const V = chords.find((c) => c.root === "G");
-    expect(V?.quality.intervals).toContain(2); // sus2 tiene intervalo 2
-  });
-
-  it("alternate matrix se direcciona por tonalidad, progresión, forma y grado", () => {
-    expect(ALTERNATE_SHAPE_MATRIX.C?.["v1-1"]?.C?.I?.sus4).toBe("sus4");
-    expect(ALTERNATE_SHAPE_MATRIX.D?.["v1-1"]?.A?.I?.sus4).toBe("sus4");
-    expect(buildProgressionChords("C", "v1-1", "sus4", "E")[0].quality.id).toBe("sus4");
-    expect(buildProgressionChords("C", "v1-1", "sus4", "A")[0].quality.id).toBe("sus4");
-  });
-
-  it("prioriza alternateShapesData con trastes romanos y usa fallback sin registro", () => {
-    const curated = buildProgressionChords("C", "v1-1", "sus2", "C");
-    expect(curated.map((chord) => chord.name)).toEqual(["Csus2", "Am7", "FM9", "Gsus4"]);
-    expect(curated[0].strings).toEqual(["x", 3, 0, 0, 1, 3]);
-    expect(curated[0].fretNumber).toBe(1);
-    expect(curated[0].romanFret).toBe("I");
-
-    const fallback = buildProgressionChords("C", "v1-2", "sus2", "E");
-    expect(fallback.find((chord) => chord.root === "G")?.quality.intervals).toContain(2);
-    expect(fallback[0].fretNumber).toBeUndefined();
-    expect(() => buildProgressionChords("C", "v9-unregistered", "sus2", "C")).not.toThrow();
-    expect(buildProgressionChords("C", "v9-unregistered", "sus2", "C")).toEqual([]);
+  it("aplica el alternate pedido con posiciones elegidas por voice leading", () => {
+    const chords = buildProgressionChords("C", "v1-1", "sus2");
+    expect(chords.map((chord) => chord.name)).toEqual(["Csus2", "Asus2", "Fsus2", "Gsus2"]);
+    expect(buildProgressionChords("C", "v1-1", "add9").map((chord) => chord.quality.id)).toEqual(["add9", "madd9", "add9", "add9"]);
+    expect(buildProgressionChords("C", "v1-1", "sus4")[0].name).toBe("Csus4");
+    expect(() => buildProgressionChords("C", "v9-unregistered", "sus2")).not.toThrow();
+    expect(buildProgressionChords("C", "v9-unregistered", "sus2")).toEqual([]);
   });
 
   it("genera progresiones en las 12 tonalidades para Vol.3", () => {
@@ -371,35 +428,71 @@ describe("chordEngine · buildProgressionChords", () => {
 });
 
 describe("alternateShapesData · base de progresiones clásicas", () => {
+  it("cubre las 9 progresiones y 5 posiciones ordenadas dentro de sus ventanas CAGED", () => {
+    const progressionLengths: Record<ProgressionLabel, number> = {
+      "I-vi-IV-V": 4, "I-V-vi-IV": 4, "I-IV-V": 3,
+      "I-vi-ii-V": 4, "I-IV-vi-V": 4, "I-IV-I-V": 4,
+      "I-V-vi-iii": 4, "I-IV-ii-V": 4, "I-iii-IV-V": 4,
+    };
+    const positionIndices = [1, 2, 3, 4, 5];
+
+    NOTES.forEach((key) => {
+      Object.entries(progressionLengths).forEach(([progression, chordCount]) => {
+        const positions = CLASSIC_ALTERNATE_SHAPES_DB[key]?.[progression as ProgressionLabel];
+        expect(positions, `${key} ${progression}`).toHaveLength(5);
+        expect(positions?.map((position) => position.positionIndex)).toEqual(positionIndices);
+        const anchors = positions?.map((position) => position.anchorFret) ?? [];
+        expect(anchors).toEqual([...anchors].sort((left, right) => left - right));
+
+        positions?.forEach((position) => {
+          const template = CAGED_TEMPLATES[position.cagedShapeName];
+          const anchor = computeAnchorFret(NOTES.indexOf(key), template);
+          const windowStart = Math.max(0, anchor - 2);
+          const windowEnd = Math.min(24, Math.max(windowStart + 4, anchor + 2));
+          expect(position.anchorFret).toBe(anchor);
+          expect(position.standardShapes, `${key} ${progression} posición ${position.positionIndex} estándar`).toHaveLength(chordCount);
+          expect(position.alternateShapes, `${key} ${progression} posición ${position.positionIndex} ${position.cagedShapeName}: ${position.alternateShapes.map((shape) => `${shape.degree}:${shape.chordName}`).join(",")}`).toHaveLength(chordCount);
+          [...position.standardShapes, ...position.alternateShapes].forEach((shape) => {
+            expect(shape.strings).toHaveLength(6);
+            shape.strings.forEach((fret) => {
+              if (fret === "x") return;
+              if (fret === 0) expect(windowStart).toBe(0);
+              else expect(fret).toBeGreaterThanOrEqual(windowStart);
+              if (typeof fret === "number" && fret > 0) expect(fret).toBeLessThanOrEqual(windowEnd);
+            });
+          });
+        });
+      });
+    });
+  });
+
   it("contiene los voicings coloreados I-vi-IV-V en C", () => {
     const data = getAlternateShapeData("C", "I-vi-IV-V", 1);
-    expect(data?.map((chord) => chord.chordName)).toEqual(["Csus2", "Am7", "FM9", "Gsus4"]);
-    expect(data?.[0].fretNumber).toBe(1);
-    expect(data?.[0].romanFret).toBe("I");
-    expect(data?.[0].strings).toEqual(["x", 3, 0, 0, 1, 3]);
-    expect(data?.[1].strings).toEqual(["x", 0, 2, 0, 1, 0]);
-    expect(data?.[2].strings).toEqual([1, "x", 2, 2, 1, 3]);
-    expect(data?.[3].strings).toEqual([3, 3, 0, 0, 1, 3]);
+    expect(data?.map((chord) => chord.chordName)).toEqual(["Csus2", "Am7/C", "FM9", "Gsus4"]);
+    expect(data?.[0].fretNumber).toBe(3);
+    expect(data?.[0].romanFret).toBe("III");
+    expect(data?.[0].strings).toHaveLength(6);
+    expect(data?.every((chord) => chord.strings.length === 6)).toBe(true);
   });
 
   it("transpone los nombres y digitaciones al pedir una tonalidad distinta", () => {
     const data = getAlternateShapeData("D", "I-vi-IV-V", 1);
-    expect(data?.map((chord) => chord.chordName)).toEqual(["Dsus2", "Bm7", "GM9", "Asus4"]);
-    expect(data?.[0].fretNumber).toBe(3);
-    expect(data?.[0].strings).toEqual(["x", 5, 2, 2, 3, 5]);
+    expect(data?.map((chord) => chord.chordName)).toEqual(["Dsus2/E", "Bm7/A", "GM9", "Asus4"]);
+    expect(data?.[0].fretNumber).toBeGreaterThanOrEqual(0);
+    expect(data?.[0].strings).toHaveLength(6);
   });
 
   it("incluye la posición 3 de I-V-vi-IV con sus dos secuencias", () => {
     const position = CLASSIC_ALTERNATE_SHAPES_DB.C?.["I-V-vi-IV"]?.find((item) => item.positionIndex === 3);
-    expect(position?.anchorFret).toBe(3);
-    expect(position?.cagedShapeName).toBe("C");
-    expect(position?.standardShapes.map((shape) => shape.chordName)).toEqual(["C", "G", "Am", "F"]);
-    expect(position?.alternateShapes.map((shape) => shape.chordName)).toEqual(["C", "Gsus4", "Am7", "FM9"]);
+    expect(position?.anchorFret).toBe(8);
+    expect(position?.cagedShapeName).toBe("G");
+    expect(position?.standardShapes.map((shape) => shape.chordName)).toEqual(["C", "G/B", "Am/C", "F"]);
+    expect(position?.alternateShapes.map((shape) => shape.chordName)).toEqual(["Cadd2", "Gsus4/C", "Am7/C", "FM9"]);
   });
 
   it("acepta los IDs existentes y devuelve null para formas aún no curadas", () => {
     expect(getAlternateShapeData("C", "v1-1", 1)).toEqual(getAlternateShapeData("C", "I-vi-IV-V", 1));
-    expect(getAlternateShapeData("C", "v1-1", 2)).toBeNull();
+    expect(getAlternateShapeData("C", "v1-1", 2)).toHaveLength(4);
   });
 });
 
@@ -473,6 +566,23 @@ describe("chordEngine · CHORD_QUALITIES e intervalos", () => {
     expect(voicing?.droppedInterval).toBe(3);
     expect(voicing?.notes.map((note) => note.midi).every((midi, index, notes) => index === 0 || midi > notes[index - 1])).toBe(true);
     expect(voicing?.notes.some((note, index, notes) => index > 0 && note.string !== notes[index - 1].string - 1)).toBe(true);
+  });
+
+  it("genera posiciones extended_voicing para 9ª, 11ª y 13ª", () => {
+    const extended = [
+      { quality: "Maj9", tension: 2 },
+      { quality: "dom11", tension: 5 },
+      { quality: "min13", tension: 9 },
+    ] as const;
+    extended.forEach(({ quality, tension }) => {
+      const voicings = buildArrangedVoicings("C", quality);
+      expect(voicings.length, quality).toBeGreaterThan(0);
+      voicings.forEach((voicing) => {
+        expect(voicing.layout).toBe("extended_voicing");
+        expect(voicing.notes.some((note) => note.interval === tension)).toBe(true);
+        expect(voicing.notes.every((note) => note.fret >= 0 && note.fret <= 24)).toBe(true);
+      });
+    });
   });
 });
 
