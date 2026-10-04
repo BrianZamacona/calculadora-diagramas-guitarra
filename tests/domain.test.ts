@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildChord, clampRange, findCagedMarks, findChordVoicings, findDoubleStopPairs, findMarks, findScaleMarks, findVoicingsForIntervals, noteAt, noteIndex, suggestNoteSets } from "../src/utils/domain";
+import { buildChord, clampRange, findCagedMarks, findChordVoicings, findDiatonicDoubleStopPairs, findDoubleStopPairs, findMarks, findScaleMarks, findVoicingsForIntervals, noteAt, noteIndex, suggestNoteSets } from "../src/utils/domain";
 import { maxFretSpanForPosition } from "../src/utils/ergonomicsEngine";
 
 describe("domain musical", () => {
@@ -20,7 +20,23 @@ describe("domain musical", () => {
     expect(pairs).toContainEqual({
       root: { stringIndex: 2, fret: 5, note: "C", interval: "1", kind: "root" },
       interval: { stringIndex: 0, fret: 0, note: "E", interval: "3", kind: "chord" },
+      distance: 4,
+      intervalQuality: "3ª mayor",
     });
+  });
+
+  it("encuentra tercera menor en el II y tercera mayor en el IV de C mayor", () => {
+    const pairs = findDiatonicDoubleStopPairs("C", "3rd", { start: 0, end: 12 });
+    const secondDegree = pairs.find((pair) => pair.degree === 2 && pair.root.note === "D");
+    const fourthDegree = pairs.find((pair) => pair.degree === 4 && pair.root.note === "F");
+    expect(secondDegree).toMatchObject({ distance: 3, intervalQuality: "3ª menor" });
+    expect(fourthDegree).toMatchObject({ distance: 4, intervalQuality: "3ª mayor" });
+  });
+
+  it("encuentra sexta mayor de 9 semitonos en el II de C mayor", () => {
+    const pairs = findDiatonicDoubleStopPairs("C", "6th", { start: 0, end: 12 });
+    const secondDegree = pairs.find((pair) => pair.degree === 2 && pair.root.note === "D");
+    expect(secondDegree).toMatchObject({ distance: 9, intervalQuality: "6ª mayor" });
   });
 
   it("no acepta como tercera mayor una nota al aire que queda debajo de la raíz", () => {

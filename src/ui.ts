@@ -1,10 +1,10 @@
 import { ARPEGGIOS, CHORD_CATEGORIES, CHORD_GLOSSARY, CAGED_QUALITIES, CAGED_SHAPES, FRET_COUNT, NOTES, SCALES, STRINGS, type ArpeggioId, type CagedLayer, type CagedQuality, type CagedShape, type ChordGlossaryEntry, type ModuleId, type ScaleId } from "./data/data";
-import { buildChord, clampRange, findChordVoicings, findCagedBoxes, findCagedLayerMarks, findDoubleStopPairs, findMarks, findScaleMarks, findVoicingMarks, findVoicingsForIntervals, intervalLabel, noteAt, noteIndex, suggestNoteSets, type ChordBase, type ChordBuilderState, type ChordVoicing, type CagedWindow, type FretMark, type FretPosition, type NoteSetSuggestion, type Range, type ScaleSystem } from "./utils/domain";
+import { buildChord, clampRange, findChordVoicings, findCagedBoxes, findCagedLayerMarks, findDiatonicDoubleStopPairs, findDoubleStopPairs, findMarks, findScaleMarks, findVoicingMarks, findVoicingsForIntervals, intervalLabel, noteAt, noteIndex, suggestNoteSets, type ChordBase, type ChordBuilderState, type ChordVoicing, type CagedWindow, type DiatonicDoubleStopInterval, type DoubleStopPair, type FretMark, type FretPosition, type NoteSetSuggestion, type Range, type ScaleSystem } from "./utils/domain";
 import { buildCagedVoicings, toRomanFret, type CagedPositionVoicing, type CagedTemplateQuality } from "./utils/chordEngine";
 import { mountCagedModule } from "./cagedModule";
 
 type DisplayMode = "notes" | "intervals" | "both";
-interface State { module: ModuleId; root: string; scale: ScaleId; scaleSystem: ScaleSystem; arpeggio: ArpeggioId; arpeggioMode: "full" | "drop2-14" | "drop2-25"; stringSet: number; cagedShape: CagedShape; cagedQuality: CagedQuality; cagedLayer: CagedLayer; display: DisplayMode; start: number; end: number; doubleStop: number; chordCategory: string; searchQuery: string; searchNotes: string[]; chordBuilder: ChordBuilderState; }
+interface State { module: ModuleId; root: string; scale: ScaleId; scaleSystem: ScaleSystem; arpeggio: ArpeggioId; arpeggioMode: "full" | "drop2-14" | "drop2-25"; stringSet: number; cagedShape: CagedShape; cagedQuality: CagedQuality; cagedLayer: CagedLayer; display: DisplayMode; start: number; end: number; doubleStop: number; doubleStopMode: "fixed" | "diatonic"; diatonicDoubleStop: DiatonicDoubleStopInterval; chordCategory: string; searchQuery: string; searchNotes: string[]; chordBuilder: ChordBuilderState; }
 
 const MODULES: Array<{ id: ModuleId; label: string }> = [
   { id: "inicio", label: "Inicio" }, { id: "acordes", label: "Acordes" }, { id: "glosario", label: "Glosario" }, { id: "buscador", label: "Buscador" }, { id: "triadas", label: "Tríadas" }, { id: "arp", label: "Arpegios" }, { id: "esc", label: "Escalas" }, { id: "ds", label: "Double stops" }, { id: "caged", label: "CAGED" },
@@ -51,6 +51,49 @@ function scaleSystemOptions(scale: ScaleId): Array<[string, string]> {
 function rangeControls(state: State): HTMLElement {
   const wrapper = el("div", "range"); const start = el("input"); start.type = "number"; start.min = "0"; start.max = String(FRET_COUNT - 3); start.value = String(state.start); start.dataset.range = "start";
   const separator = el("span"); separator.textContent = "a"; const end = el("input"); end.type = "number"; end.min = "3"; end.max = String(FRET_COUNT); end.value = String(state.end); end.dataset.range = "end"; wrapper.append(start, separator, end); return wrapper;
+}
+function doubleStopControls(state: State, onChange: () => void): HTMLElement[] {
+  const mode = selectControl("double-stop-mode", ["fixed", "diatonic"], state.doubleStopMode);
+  mode.replaceChildren(...[["fixed", "Intervalo fijo"], ["diatonic", "Diatónico en la tonalidad"]].map(([value, label]) => {
+    const option = el("option"); option.value = value; option.textContent = label; return option;
+  }));
+  mode.value = state.doubleStopMode;
+  mode.addEventListener("change", () => { state.doubleStopMode = mode.value as State["doubleStopMode"]; onChange(); });
+
+  const fixedIntervals: Array<[string, string]> = [["3", "3as menores"], ["4", "3as mayores"], ["5", "4as justas"], ["7", "5as justas"], ["8", "6as menores"], ["9", "6as mayores"]];
+  const diatonicIntervals: Array<[DiatonicDoubleStopInterval, string]> = [["2nd", "2ª"], ["3rd", "3ª"], ["4th", "4ª"], ["5th", "5ª"], ["6th", "6ª"], ["7th", "7ª"]];
+  const isDiatonic = state.doubleStopMode === "diatonic";
+  const options: Array<[string, string]> = isDiatonic ? diatonicIntervals : fixedIntervals;
+  const selected = isDiatonic ? state.diatonicDoubleStop : String(state.doubleStop);
+  const interval = selectControl("double-stop", options.map(([value]) => value), selected);
+  interval.replaceChildren(...options.map(([value, label]) => {
+    const option = el("option"); option.value = value; option.textContent = label; return option;
+  }));
+  interval.value = selected;
+  interval.addEventListener("change", () => {
+    if (state.doubleStopMode === "diatonic") state.diatonicDoubleStop = interval.value as DiatonicDoubleStopInterval;
+    else state.doubleStop = Number(interval.value);
+    onChange();
+  });
+  return [field("Modo", mode), field("Intervalo", interval)];
+}
+
+function doubleStopPairsForState(state: State, range: Range): DoubleStopPair[] {
+  if (state.doubleStopMode === "diatonic") return findDiatonicDoubleStopPairs(state.root, state.diatonicDoubleStop, range);
+  return findDoubleStopPairs(state.root, state.doubleStop, range);
+}
+
+function doubleStopStatus(state: State, range: Range): string {
+  const pairs = doubleStopPairsForState(state, range);
+  if (state.doubleStopMode === "fixed") {
+    return pairs.length === 0
+      ? `${state.root}: no hay parejas ascendentes de ${intervalLabel(state.doubleStop)} en este rango.`
+      : `${state.root}: intervalo ${intervalLabel(state.doubleStop)} · ${pairs.length} parejas en este rango.`;
+  }
+  const qualities = [...new Set(pairs.map((pair) => pair.intervalQuality))].join(" / ");
+  return pairs.length === 0
+    ? `${state.root} mayor: no hay parejas diatónicas de ${state.diatonicDoubleStop} en este rango.`
+    : `${state.root} mayor: ${state.diatonicDoubleStop} · ${qualities} · ${pairs.length} parejas.`;
 }
 const LEGEND_ITEMS: ReadonlyArray<[FretMark["kind"], string]> = [["root", "Raíz"], ["chord", "Nota del acorde"], ["scale", "Nota de la escala"], ["blue", "Blue note"]];
 function legend(isDoubleStop = false): HTMLElement {
@@ -387,11 +430,11 @@ function chordBuilderView(state: State, onChange: () => void): HTMLElement {
 }
 function controls(state: State, onChange: () => void): HTMLElement {
   const panel = el("div", "panel controls");
-  if (state.module !== "acordes" && state.module !== "buscador") { const root = selectControl("root", NOTES, state.root); root.addEventListener("change", () => { state.root = root.value; onChange(); }); panel.append(field("Nota raíz", root)); }
+  if (state.module !== "acordes" && state.module !== "buscador") { const root = selectControl("root", NOTES, state.root); root.addEventListener("change", () => { state.root = root.value; onChange(); }); panel.append(field(state.module === "ds" && state.doubleStopMode === "diatonic" ? "Tonalidad" : "Nota raíz", root)); }
   if (state.module === "triadas") { const strings = selectControl("string-set", ["0", "1", "2", "3"], String(state.stringSet)); strings.replaceChildren(...["Cuerdas 1-2-3", "Cuerdas 2-3-4", "Cuerdas 3-4-5", "Cuerdas 4-5-6"].map((label, index) => { const option = el("option"); option.value = String(index); option.textContent = label; return option; })); strings.value = String(state.stringSet); strings.addEventListener("change", () => { state.stringSet = Number(strings.value); onChange(); }); panel.append(field("Juego de cuerdas", strings)); }
   if (state.module === "esc") { const scale = selectControl("scale", Object.keys(SCALES), state.scale); scale.replaceChildren(...SCALE_GROUPS.map(([groupLabel, ids]) => { const group = document.createElement("optgroup"); group.label = groupLabel; group.append(...ids.map((id) => { const option = el("option"); option.value = id; option.textContent = SCALES[id].label; return option; })); return group; })); scale.value = state.scale; scale.addEventListener("change", () => { state.scale = scale.value as ScaleId; onChange(); }); panel.append(field("Escala / modo", scale)); }
   if (state.module === "arp") { const arp = selectControl("arpeggio", Object.keys(ARPEGGIOS), state.arpeggio); arp.replaceChildren(...Object.entries(ARPEGGIOS).map(([id, item]) => { const option = el("option"); option.value = id; option.textContent = item.label; return option; })); arp.value = state.arpeggio; arp.addEventListener("change", () => { state.arpeggio = arp.value as ArpeggioId; onChange(); }); panel.append(field("Tipo de arpegio", arp)); const mode = selectControl("arpeggio-mode", ["full", "drop2-14", "drop2-25"], state.arpeggioMode); mode.replaceChildren(...[["full", "Arpegio completo"], ["drop2-14", "Drop 2: cuerdas 1-4"], ["drop2-25", "Drop 2: cuerdas 2-5"]].map(([value, label]) => { const option = el("option"); option.value = value; option.textContent = label; return option; })); mode.value = state.arpeggioMode; mode.addEventListener("change", () => { state.arpeggioMode = mode.value as State["arpeggioMode"]; onChange(); }); panel.append(field("Modo de visualización", mode)); }
-  if (state.module === "ds") { const distance = selectControl("double-stop", ["3", "4", "5", "7", "8", "9"], String(state.doubleStop)); distance.replaceChildren(...[["3", "3as menores"], ["4", "3as mayores"], ["5", "4as justas"], ["7", "5as justas"], ["8", "6as menores"], ["9", "6as mayores"]].map(([value, label]) => { const option = el("option"); option.value = value; option.textContent = label; return option; })); distance.value = String(state.doubleStop); distance.addEventListener("change", () => { state.doubleStop = Number(distance.value); onChange(); }); panel.append(field("Intervalo", distance)); }
+  if (state.module === "ds") panel.append(...doubleStopControls(state, onChange));
   if (state.module === "esc") { const options = scaleSystemOptions(state.scale); const validSystem = options.some(([value]) => value === state.scaleSystem) ? state.scaleSystem : "all"; state.scaleSystem = validSystem; const system = selectControl("scale-system", options.map(([value]) => value), validSystem); system.replaceChildren(...options.map(([value, label]) => { const option = el("option"); option.value = value; option.textContent = label; return option; })); system.value = validSystem; system.addEventListener("change", () => { state.scaleSystem = system.value as ScaleSystem; onChange(); }); panel.append(field("Sistema / posición", system)); }
   if (state.module === "caged") { const shape = selectControl("caged-shape", ["ALL", ...CAGED_SHAPES.map((item) => item.id)], state.cagedShape); shape.replaceChildren(...[{ id: "ALL", label: "Todas las formas" }, ...CAGED_SHAPES].map((item) => { const option = el("option"); option.value = item.id; option.textContent = item.label; return option; })); shape.value = state.cagedShape; shape.addEventListener("change", () => { state.cagedShape = shape.value as CagedShape; onChange(); }); panel.append(field("Forma CAGED", shape)); }
   if (state.module === "caged") { const quality = selectControl("caged-quality", Object.keys(CAGED_QUALITIES), state.cagedQuality); quality.replaceChildren(...Object.entries(CAGED_QUALITIES).map(([id, item]) => { const option = el("option"); option.value = id; option.textContent = item.label; return option; })); quality.value = state.cagedQuality; quality.addEventListener("change", () => { state.cagedQuality = quality.value as CagedQuality; onChange(); }); panel.append(field("Calidad del acorde", quality)); const layer = selectControl("caged-layer", ["chord", "pentatonic", "scale"], state.cagedLayer); layer.replaceChildren(...[["chord", "Solo acorde"], ["pentatonic", "Acorde + pentatónica"], ["scale", "Acorde + escala diatónica"]].map(([value, label]) => { const option = el("option"); option.value = value; option.textContent = label; return option; })); layer.value = state.cagedLayer; layer.addEventListener("change", () => { state.cagedLayer = layer.value as CagedLayer; onChange(); }); panel.append(field("Capas", layer)); }
@@ -445,7 +488,7 @@ function board(marks: FretMark[], range: Range, display: DisplayMode, cagedBoxes
 function renderBoard(state: State): HTMLElement {
   const range = clampRange(state.start, state.end); let marks: FretMark[];
   if (state.module === "ds") {
-    const pairs = findDoubleStopPairs(state.root, state.doubleStop, range);
+    const pairs = doubleStopPairsForState(state, range);
     const uniqueMarks = new Map<string, FretMark>();
     pairs.forEach(({ root, interval }) => {
       uniqueMarks.set(`${root.stringIndex}:${root.fret}`, root);
@@ -465,7 +508,7 @@ function renderBoard(state: State): HTMLElement {
 }
 
 export function mountApp(root: HTMLElement): void {
-  const state: State = { module: "inicio", root: "C", scale: "mayor", scaleSystem: "all", arpeggio: "Maj", arpeggioMode: "full", stringSet: 0, cagedShape: "ALL", cagedQuality: "Maj", cagedLayer: "chord", display: "notes", start: 0, end: FRET_COUNT, doubleStop: 3, chordCategory: "Todos", searchQuery: "", searchNotes: [], chordBuilder: { root: "C", base: "major", bass: undefined, fifth: "5", seventh: "none", extensions: [], additions: [] } };
+  const state: State = { module: "inicio", root: "C", scale: "mayor", scaleSystem: "all", arpeggio: "Maj", arpeggioMode: "full", stringSet: 0, cagedShape: "ALL", cagedQuality: "Maj", cagedLayer: "chord", display: "notes", start: 0, end: FRET_COUNT, doubleStop: 3, doubleStopMode: "fixed", diatonicDoubleStop: "3rd", chordCategory: "Todos", searchQuery: "", searchNotes: [], chordBuilder: { root: "C", base: "major", bass: undefined, fifth: "5", seventh: "none", extensions: [], additions: [] } };
   const app = el("main"); const hero = el("header", "hero"); const eyebrow = el("div", "eyebrow"); eyebrow.textContent = "Teoría aplicada al mástil"; const title = el("h1"); title.textContent = "Diapasón"; const description = el("p"); description.textContent = "Aprende guitarra desde cero o profundiza tu teoría musical: acordes, escalas y arpegios sobre un mástil de 24 trastes."; hero.append(el("div")); hero.firstElementChild?.append(eyebrow, title, description); app.append(hero);
   const tabs = el("nav", "tabs"); tabs.setAttribute("role", "tablist"); tabs.setAttribute("aria-label", "Módulos de estudio"); const content = el("section", "panel"); content.id = "content-panel"; content.setAttribute("role", "tabpanel"); content.tabIndex = -1; app.append(tabs, content); root.replaceChildren(app);
   const draw = (): void => {
@@ -493,10 +536,7 @@ export function mountApp(root: HTMLElement): void {
     if (state.module === "esc") moduleLabel = SCALES[state.scale].label;
     else if (state.module === "arp") moduleLabel = ARPEGGIOS[state.arpeggio].label;
     if (state.module === "ds") {
-      const pairs = findDoubleStopPairs(state.root, state.doubleStop, clampRange(state.start, state.end));
-      status.textContent = pairs.length === 0
-        ? `${state.root}: no hay parejas ascendentes de ${intervalLabel(state.doubleStop)} en este rango.`
-        : `${state.root}: intervalo ${intervalLabel(state.doubleStop)} · ${pairs.length} parejas en este rango.`;
+      status.textContent = doubleStopStatus(state, clampRange(state.start, state.end));
     } else status.textContent = `${state.root}: ${moduleLabel}.`;
     content.append(status);
   };

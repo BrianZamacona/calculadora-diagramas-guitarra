@@ -8,7 +8,59 @@ import { maxFretSpanForPosition } from "./ergonomicsEngine";
 export type MarkKind = "root" | "chord" | "scale" | "blue";
 export interface FretMark { stringIndex: number; fret: number; note: Note; interval: string; kind: MarkKind; }
 export interface Range { start: number; end: number; }
-export interface DoubleStopPair { root: FretMark; interval: FretMark; }
+export interface DoubleStopPair {
+  root: FretMark;
+  interval: FretMark;
+  distance: number;
+  intervalQuality: string;
+  degree?: number;
+}
+export type DiatonicDoubleStopInterval = "2nd" | "3rd" | "4th" | "5th" | "6th" | "7th";
+
+interface DiatonicIntervalDefinition {
+  distance: number;
+  quality: string;
+}
+
+const MAJOR_SCALE_STEPS = [0, 2, 4, 5, 7, 9, 11] as const;
+const DIATONIC_DOUBLE_STOP_INTERVALS: Record<DiatonicDoubleStopInterval, readonly DiatonicIntervalDefinition[]> = {
+  "2nd": [
+    { distance: 2, quality: "2ª mayor" }, { distance: 2, quality: "2ª mayor" },
+    { distance: 1, quality: "2ª menor" }, { distance: 2, quality: "2ª mayor" },
+    { distance: 2, quality: "2ª mayor" }, { distance: 2, quality: "2ª mayor" },
+    { distance: 1, quality: "2ª menor" },
+  ],
+  "3rd": [
+    { distance: 4, quality: "3ª mayor" }, { distance: 3, quality: "3ª menor" },
+    { distance: 3, quality: "3ª menor" }, { distance: 4, quality: "3ª mayor" },
+    { distance: 4, quality: "3ª mayor" }, { distance: 3, quality: "3ª menor" },
+    { distance: 3, quality: "3ª menor" },
+  ],
+  "4th": [
+    { distance: 5, quality: "4ª justa" }, { distance: 5, quality: "4ª justa" },
+    { distance: 5, quality: "4ª justa" }, { distance: 6, quality: "4ª aumentada" },
+    { distance: 5, quality: "4ª justa" }, { distance: 5, quality: "4ª justa" },
+    { distance: 5, quality: "4ª justa" },
+  ],
+  "5th": [
+    { distance: 7, quality: "5ª justa" }, { distance: 7, quality: "5ª justa" },
+    { distance: 7, quality: "5ª justa" }, { distance: 7, quality: "5ª justa" },
+    { distance: 7, quality: "5ª justa" }, { distance: 7, quality: "5ª justa" },
+    { distance: 6, quality: "5ª disminuida" },
+  ],
+  "6th": [
+    { distance: 9, quality: "6ª mayor" }, { distance: 9, quality: "6ª mayor" },
+    { distance: 8, quality: "6ª menor" }, { distance: 9, quality: "6ª mayor" },
+    { distance: 9, quality: "6ª mayor" }, { distance: 8, quality: "6ª menor" },
+    { distance: 8, quality: "6ª menor" },
+  ],
+  "7th": [
+    { distance: 11, quality: "7ª mayor" }, { distance: 10, quality: "7ª menor" },
+    { distance: 10, quality: "7ª menor" }, { distance: 11, quality: "7ª mayor" },
+    { distance: 10, quality: "7ª menor" }, { distance: 10, quality: "7ª menor" },
+    { distance: 9, quality: "7ª disminuida" },
+  ],
+};
 
 const OPEN_STRING_MIDI_STANDARD_TUNING = [64, 59, 55, 50, 45, 40] as const;
 
@@ -602,9 +654,24 @@ export function findMarks(root: string, intervals: readonly number[], range: Ran
   return TUNING.flatMap((_, stringIndex) => findStringMarks(rootIndex, intervals, stringIndex, range, blue));
 }
 
-export function findDoubleStopPairs(root: string, distance: number, range: Range): DoubleStopPair[] {
+function intervalQualityForDistance(distance: number): string {
+  const names: Record<number, string> = {
+    1: "2ª menor", 2: "2ª mayor", 3: "3ª menor", 4: "3ª mayor", 5: "4ª justa",
+    6: "4ª aumentada", 7: "5ª justa", 8: "6ª menor", 9: "6ª mayor",
+    10: "7ª menor", 11: "7ª mayor",
+  };
+  return names[distance] ?? `${distance} semitonos`;
+}
+
+function searchDoubleStopPairs(
+  root: string,
+  distance: number,
+  intervalQuality: string,
+  range: Range,
+  degree?: number,
+): DoubleStopPair[] {
   const rootIndex = noteIndex(root);
-  if (rootIndex < 0 || !Number.isInteger(distance) || distance <= 0) return [];
+  if (rootIndex < 0 || !Number.isInteger(distance) || distance <= 0 || distance >= NOTES.length) return [];
   const pairs: DoubleStopPair[] = [];
   for (let baseString = 1; baseString <= 5; baseString += 1) {
     for (let fret = range.start; fret <= range.end; fret += 1) {
@@ -619,12 +686,33 @@ export function findDoubleStopPairs(root: string, distance: number, range: Range
           pairs.push({
             root: { stringIndex: baseString, fret, note: noteAt(baseString, fret), interval: intervalLabel(baseDistance), kind: "root" },
             interval: { stringIndex: companionString, fret: companionFret, note: noteAt(companionString, companionFret), interval: intervalLabel(distance), kind: "chord" },
+            distance,
+            intervalQuality,
+            ...(degree === undefined ? {} : { degree }),
           });
         }
       });
     }
   }
   return pairs;
+}
+
+export function findDoubleStopPairs(root: string, distance: number, range: Range): DoubleStopPair[] {
+  return searchDoubleStopPairs(root, distance, intervalQualityForDistance(distance), range);
+}
+
+export function findDiatonicDoubleStopPairs(
+  key: string,
+  intervalType: DiatonicDoubleStopInterval,
+  range: Range,
+): DoubleStopPair[] {
+  const keyIndex = noteIndex(key);
+  const intervals = DIATONIC_DOUBLE_STOP_INTERVALS[intervalType];
+  if (keyIndex < 0 || !intervals) return [];
+  return intervals.flatMap(({ distance, quality }, index) => {
+    const degreeRoot = NOTES[(keyIndex + MAJOR_SCALE_STEPS[index]) % NOTES.length];
+    return searchDoubleStopPairs(degreeRoot, distance, quality, range, index + 1);
+  });
 }
 
 export function findVoicingMarks(root: string, intervals: readonly number[], firstString: number, range: Range): FretMark[] {
