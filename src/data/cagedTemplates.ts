@@ -96,6 +96,10 @@ export interface CagedTemplate {
   minorOverrides: Partial<CagedNote>[];
   /** Digitación menor completa cuando difiere estructuralmente de la forma mayor. */
   minorShape?: CagedNote[];
+  /** Digitación min7 y cuerda raíz propias cuando difieren de la forma menor. */
+  minor7Shape?: CagedNote[];
+  minor7RootString?: number;
+  minor7Barre?: CagedBarre;
   /** Barré si aplica */
   barre?: CagedBarre;
   /** Barré específico de la digitación menor. */
@@ -105,6 +109,21 @@ export interface CagedTemplate {
 }
 
 export type CagedQuality = "major" | "minor" | "dom7" | "Maj7" | "min7";
+
+export function computeCagedAnchorFretForQuality(
+  rootPitch: number,
+  template: CagedTemplate,
+  quality: CagedQuality,
+  octaveShift = 0,
+): number {
+  const rootString = quality === "min7" ? template.minor7RootString ?? template.rootString : template.rootString;
+  const anchor = computeAnchorFret(rootPitch, template, octaveShift, rootString);
+  if (quality !== "min7" || !template.minor7Shape?.some((note) => anchor + note.relativeFret < 0)) return anchor;
+  const nextOctaveAnchor = anchor + 12;
+  return template.minor7Shape.every((note) => nextOctaveAnchor + note.relativeFret >= 0 && nextOctaveAnchor + note.relativeFret <= 24)
+    ? nextOctaveAnchor
+    : anchor;
+}
 
 export interface ResolvedCagedShape {
   notes: Array<{ string: number; fret: number; interval: number; finger: number }>;
@@ -187,6 +206,13 @@ const SHAPE_G: CagedTemplate = {
     { string: 1, relativeFret: 0, interval: 7, finger: 1 }, // 5ª bajo la cejilla
     { string: 0, relativeFret: 0, interval: 0, finger: 1 }, // raíz bajo la cejilla
   ],
+  minor7RootString: 2,
+  minor7Shape: [
+    { string: 3, relativeFret: 0, interval: 7, finger: 3 }, // quinta en D
+    { string: 2, relativeFret: 0, interval: 0, finger: 2 }, // raíz en G
+    { string: 1, relativeFret: -1, interval: 3, finger: 1 }, // b3 en B
+    { string: 0, relativeFret: 1, interval: 10, finger: 4 }, // b7 en e
+  ],
   barre: { relativeFret: -3, fromString: 3, toString: 1, finger: 1 },
   minorBarre: { relativeFret: 0, fromString: 5, toString: 0, finger: 1 },
   muted: [],
@@ -249,8 +275,13 @@ export const CAGED_TEMPLATES: Record<"C" | "A" | "G" | "E" | "D", CagedTemplate>
  * anchorFret = (rootPitch - TUNING[rootString] + 12) % 12
  * Luego se puede desplazar +12 para la octava alta.
  */
-export function computeAnchorFret(rootPitch: number, template: CagedTemplate, octaveShift = 0): number {
-  const openPitch = TUNING[template.rootString];
+export function computeAnchorFret(
+  rootPitch: number,
+  template: CagedTemplate,
+  octaveShift = 0,
+  rootString = template.rootString,
+): number {
+  const openPitch = TUNING[rootString];
   return ((rootPitch - openPitch + 12) % 12) + octaveShift;
 }
 
@@ -261,17 +292,23 @@ export function resolveCagedShape(
   quality: CagedQuality = "major",
   octaveShift = 0,
 ): ResolvedCagedShape {
-  const anchor = computeAnchorFret(rootPitch, template, octaveShift);
+  const useMinor7Shape = quality === "min7" && template.minor7Shape !== undefined;
+  const anchor = computeCagedAnchorFretForQuality(rootPitch, template, quality, octaveShift);
   let shape = template.major.map((note) => ({ ...note }));
   let barre = template.barre;
 
   if (quality === "minor" || quality === "min7") {
-    shape = template.minorShape
-      ? template.minorShape.map((note) => ({ ...note }))
-      : applyOverrides(shape, template.minorOverrides);
-    barre = template.minorBarre ?? barre;
+    if (useMinor7Shape) {
+      shape = template.minor7Shape!.map((note) => ({ ...note }));
+      barre = template.minor7Barre;
+    } else {
+      shape = template.minorShape
+        ? template.minorShape.map((note) => ({ ...note }))
+        : applyOverrides(shape, template.minorOverrides);
+      barre = template.minorBarre ?? barre;
+    }
   }
-  if (quality === "dom7" || quality === "Maj7" || quality === "min7") {
+  if (quality === "dom7" || quality === "Maj7" || (quality === "min7" && !useMinor7Shape)) {
     const fretDrop = quality === "Maj7" ? 1 : 2;
     const seventh = quality === "Maj7" ? 11 : 10;
     shape = lowerRootToSeventh(shape, template, fretDrop, seventh);

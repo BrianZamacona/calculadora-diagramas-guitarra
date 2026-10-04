@@ -14,7 +14,7 @@
 
 import { NOTES, type Note } from "../data/data";
 import { addInterval, findAllVoicingsForIntervals, findVoicingsForIntervals, MusicNote, noteIndex, type ChordVoicing } from "./domain";
-import { CAGED_TEMPLATES, clipCagedBarre, computeAnchorFret, resolveCagedShape, type CagedQuality, type CagedTemplate } from "../data/cagedTemplates";
+import { CAGED_TEMPLATES, clipCagedBarre, computeCagedAnchorFretForQuality, resolveCagedShape, type CagedQuality, type CagedTemplate } from "../data/cagedTemplates";
 import { calculateErgonomicCost, STANDARD_OPEN_STRING_MIDI } from "./ergonomicsEngine";
 import { findOptimalProgressionPath, type VoiceLeadingVoicing } from "./voiceLeadingEngine";
 
@@ -604,8 +604,11 @@ export function buildCagedVoicings(
 
   for (const shapeId of shapes) {
     const template: CagedTemplate = CAGED_TEMPLATES[shapeId];
+    const seenAnchors = new Set<number>();
     for (const octaveShift of [0, 12]) {
-      const anchor = computeAnchorFret(rootPitch, template, octaveShift);
+      const anchor = computeCagedAnchorFretForQuality(rootPitch, template, quality, octaveShift);
+      if (seenAnchors.has(anchor)) continue;
+      seenAnchors.add(anchor);
       if (anchor < 0 || anchor > 20) continue;
       const resolved = resolveCagedShape(rootPitch, template, quality, octaveShift);
       if (resolved.notes.length === 0) continue;

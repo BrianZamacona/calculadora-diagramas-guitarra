@@ -94,6 +94,21 @@ function progressionChordVoicing(step: ProgressionVoicingStep, shape: CagedShape
   };
 }
 
+function sameCagedPosition(left: CagedPositionVoicing, right: CagedPositionVoicing): boolean {
+  return left.anchorFret === right.anchorFret
+    && left.notes.length === right.notes.length
+    && left.notes.every((note) => right.notes.some((candidate) =>
+      candidate.string === note.string && candidate.fret === note.fret && candidate.interval === note.interval,
+    ));
+}
+
+function cagedShapeLabel(voicing: CagedPositionVoicing, voicings: readonly CagedPositionVoicing[]): string {
+  if (voicing.displayName) return voicing.displayName;
+  if (voicing.shape !== "G") return voicing.shape;
+  const hasMatchingEShape = voicings.some((candidate) => candidate.shape === "E" && sameCagedPosition(voicing, candidate));
+  return hasMatchingEShape ? "G (usa la digitación E)" : voicing.shape;
+}
+
 function progressionVoiceLeadingOptions(state: CagedModuleState) {
   return state.altShape === "none"
     ? { includeTexturalAlternatives: false }
@@ -343,7 +358,7 @@ export function mountCagedModule(container: HTMLElement): void {
     shapeTabs.replaceChildren();
     currentVoicings.slice(0, 5).forEach((v, idx) => {
       const tab = el("button", `shape-tab${idx === state.selectedShapeIdx ? " active" : ""}`);
-      tab.textContent = `${v.displayName ?? v.shape} · T${toRomanFret(v.anchorFret)}`;
+      tab.textContent = `${cagedShapeLabel(v, currentVoicings)} · T${toRomanFret(v.anchorFret)}`;
       tab.id = `shape-tab-${idx}`;
       tab.addEventListener("click", () => {
         state.selectedShapeIdx = idx;
@@ -363,9 +378,11 @@ export function mountCagedModule(container: HTMLElement): void {
     }
     const voicing = currentVoicings[Math.min(state.selectedShapeIdx, currentVoicings.length - 1)];
     if (!voicing) return;
+    const displayName = cagedShapeLabel(voicing, currentVoicings);
+    const labeledVoicing = displayName === voicing.shape ? voicing : { ...voicing, displayName };
 
     currentSVG = renderCAGEDFretboard(diagramArea, {
-      voicing,
+      voicing: labeledVoicing,
       chordName: currentDiagramChordName,
       rootNote: currentDiagramRoot,
       labelMode: state.labelMode,

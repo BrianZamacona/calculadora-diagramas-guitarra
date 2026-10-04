@@ -20,6 +20,7 @@ import {
   cagedQualityToEngine,
   progressionNotes,
   toRomanFret,
+  type CagedShapeId,
   type ChordQualityId,
 } from "../src/utils/chordEngine";
 import {
@@ -243,6 +244,21 @@ describe("chordEngine · buildCagedVoicings", () => {
     const voicings = buildCagedVoicings("A", "minor");
     const hasMinorThird = voicings.some((v) => v.notes.some((n) => n.interval === 3));
     expect(hasMinorThird).toBe(true);
+  });
+
+  it("G menor triada comparte la digitación E de la guía, pero Gm7 tiene voicing propio", () => {
+    const tabForShape = (shape: CagedShapeId, quality: "minor" | "min7"): Array<number | null> => {
+      const voicing = buildCagedVoicings("G", quality).find((candidate) => candidate.shape === shape && candidate.anchorFret === (shape === "G" && quality === "min7" ? 12 : 3));
+      return Array.from({ length: 6 }, (_, tabIndex) =>
+        voicing?.notes.find((note) => note.string === 5 - tabIndex)?.fret ?? null,
+      );
+    };
+    const gMinorTab = tabForShape("G", "minor");
+    const eMinorTab = tabForShape("E", "minor");
+    expect(gMinorTab).toEqual([3, 5, 5, 3, 3, 3]);
+    expect(gMinorTab).toEqual(eMinorTab);
+    expect(tabForShape("G", "min7")).toEqual([null, null, 12, 12, 11, 13]);
+    expect(buildCagedVoicings("G", "min7").filter((candidate) => candidate.shape === "G" && candidate.anchorFret === 12)).toHaveLength(1);
   });
 
   it("forma A menor abierta conserva x-0-2-2-1-0", () => {
