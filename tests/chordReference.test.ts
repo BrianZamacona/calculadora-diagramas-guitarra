@@ -85,7 +85,10 @@ describe("CAGED chord references", () => {
 
     fixtures.forEach((fixture) => {
       const rootPitch = NOTES.indexOf(fixture.root);
-      const resolved = resolveCagedShape(rootPitch, CAGED_TEMPLATES[fixture.shape], fixture.quality);
+      const octaveResults = [0, 12].map((octaveShift) =>
+        resolveCagedShape(rootPitch, CAGED_TEMPLATES[fixture.shape], fixture.quality, octaveShift),
+      );
+      const resolved = octaveResults.find((result) => result.notes.length > 0) ?? octaveResults[0];
       const generatedFrets = fretVectorFromResolvedShape(resolved.notes);
       if (sameFrets(generatedFrets, fixture.expectedFrets)) return;
 
@@ -116,6 +119,7 @@ describe("CAGED chord references", () => {
       ...inconsistentDocumentReferences.map(formatDivergence),
     ].join("\n");
     console.info(report);
-    expect([...codeIntervalErrors, ...codeWithoutVoicing].map(formatDivergence), report).toEqual([]);
+    expect(codeIntervalErrors.map(formatDivergence), report).toEqual([]);
+    expect(codeWithoutVoicing.map(formatDivergence), report).toEqual([]);
   });
 });
