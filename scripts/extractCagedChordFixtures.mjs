@@ -15,8 +15,12 @@ function sourceRoot(filename) {
 }
 
 function heading(line) {
-  const match = /^(#{1,6})\s+(.+)$/.exec(line.trim());
-  return match ? { level: match[1].length, text: match[2] } : undefined;
+  const trimmed = line.trim();
+  let level = 0;
+  while (level < trimmed.length && trimmed[level] === "#") level += 1;
+  if (level === 0 || level > 6 || !/\s/.test(trimmed[level] ?? "")) return undefined;
+  const text = trimmed.slice(level).trim();
+  return text.length > 0 ? { level, text } : undefined;
 }
 
 function qualityForHeading(text) {
@@ -27,18 +31,50 @@ function qualityForHeading(text) {
 }
 
 function cagedPosition(line) {
-  const content = line.trim().replace(/^#{1,6}\s*/, "").replace(/^[-*]\s*/, "").replace(/^\*\*/, "");
-  const match = /^Posición\s+([CAGED])\s*\([^)]*\)\s*:?\s*\*{0,2}\s*(.*)$/i.exec(content);
-  if (!match || !shapes.has(match[1].toUpperCase())) return undefined;
-  return { shape: match[1].toUpperCase(), remainder: match[2] };
+  let content = heading(line)?.text ?? line.trim();
+  if (content.startsWith("*") || content.startsWith("-")) content = content.slice(1).trimStart();
+  while (content.startsWith("**")) content = content.slice(2).trimStart();
+  const prefix = "Posición ";
+  if (!content.toLowerCase().startsWith(prefix.toLowerCase())) return undefined;
+  const shape = content[prefix.length]?.toUpperCase();
+  if (!shape || !shapes.has(shape)) return undefined;
+  const afterShape = content.slice(prefix.length + 1);
+  if (afterShape.length > 0 && !/\s/.test(afterShape[0])) return undefined;
+  const positionDetails = afterShape.trimStart();
+  if (!positionDetails.startsWith("(")) return undefined;
+  const closingParenthesis = positionDetails.indexOf(")");
+  if (closingParenthesis < 0) return undefined;
+  let remainder = positionDetails.slice(closingParenthesis + 1).trimStart();
+  if (remainder.startsWith(":")) remainder = remainder.slice(1).trimStart();
+  while (remainder.startsWith("**")) remainder = remainder.slice(2).trimStart();
+  return { shape, remainder };
 }
 
 function parseFrets(text) {
-  const code = /`([^`]*)`/.exec(text)?.[1];
-  if (!code) return undefined;
-  const tokens = code.match(/\bx\b|\d+/gi);
-  if (!tokens || tokens.length !== 6) return undefined;
+  const backtickStart = text.indexOf("`");
+  const bracketStart = text.indexOf("[");
+  const delimiterStart = backtickStart >= 0 ? backtickStart : bracketStart;
+  if (delimiterStart < 0) return undefined;
+  const delimiter = backtickStart >= 0 ? "`" : "]";
+  const contentStart = delimiterStart + 1;
+  const delimiterEnd = text.indexOf(delimiter, contentStart);
+  if (delimiterEnd < 0) return undefined;
+  const fretText = text.slice(contentStart, delimiterEnd).replaceAll("[", "").replaceAll("]", "");
+  const tokens = fretText.split(/[\s,-]+/).filter(Boolean);
+  if (tokens?.length !== 6 || tokens.some((token) => token.toLowerCase() !== "x" && !/^\d+$/.test(token))) return undefined;
   return tokens.map((token) => token.toLowerCase() === "x" ? null : Number(token));
+}
+
+function followingTablature(lines, startIndex, endIndex) {
+  for (let cursor = startIndex; cursor < endIndex; cursor += 1) {
+    if (heading(lines[cursor]) || cagedPosition(lines[cursor])) return undefined;
+    if (lines[cursor].toLowerCase().includes("tablatura")) return parseFrets(lines[cursor]);
+  }
+  return undefined;
+}
+
+function fretsForPosition(lines, index, endIndex, position) {
+  return parseFrets(position.remainder) ?? followingTablature(lines, index + 1, endIndex);
 }
 
 function extractSection(lines, startIndex, endIndex, root, quality, filename) {
@@ -46,21 +82,38 @@ function extractSection(lines, startIndex, endIndex, root, quality, filename) {
   for (let index = startIndex; index < endIndex; index += 1) {
     const position = cagedPosition(lines[index]);
     if (!position) continue;
-
-    let expectedFrets = parseFrets(position.remainder);
-    if (!expectedFrets) {
-      for (let cursor = index + 1; cursor < endIndex; cursor += 1) {
-        if (heading(lines[cursor]) || cagedPosition(lines[cursor])) break;
-        if (/tablatura/i.test(lines[cursor])) {
-          expectedFrets = parseFrets(lines[cursor]);
-          break;
-        }
-      }
-    }
+    const expectedFrets = fretsForPosition(lines, index, endIndex, position);
     if (!expectedFrets) throw new Error(`No se pudo leer la tablatura ${root} ${quality} ${position.shape} en ${filename}:${index + 1}`);
     sectionShapes.push({ root, quality, shape: position.shape, expectedFrets });
   }
   return sectionShapes;
+}
+
+function sectionEndIndex(lines, startIndex, level) {
+  for (let cursor = startIndex + 1; cursor < lines.length; cursor += 1) {
+    const nextHeading = heading(lines[cursor]);
+    if (nextHeading && nextHeading.level <= level) return cursor;
+  }
+  return lines.length;
+}
+
+function isCagedLabel(line) {
+  let content = line.trim();
+  if (content.startsWith("*") || content.startsWith("-")) content = content.slice(1).trimStart();
+  const normalized = content.replaceAll("*", "").trim().toLowerCase();
+  return normalized === "caged:" || normalized === "caged";
+}
+
+function hasCagedPositions(lines, startIndex, endIndex, title) {
+  if (title.toLowerCase().includes("caged")) return true;
+  return lines.slice(startIndex, endIndex).some(isCagedLabel);
+}
+
+function validateCagedSection(sectionFixtures, filename, title) {
+  const uniqueShapes = new Set(sectionFixtures.map((fixture) => fixture.shape));
+  if (sectionFixtures.length !== 5 || uniqueShapes.size !== 5) {
+    throw new Error(`Se esperaban las cinco formas CAGED en ${filename}: ${title}`);
+  }
 }
 
 async function extractFile(filename) {
@@ -74,26 +127,11 @@ async function extractFile(filename) {
     if (!currentHeading) continue;
     const quality = qualityForHeading(currentHeading.text);
     if (!quality) continue;
-
-    let endIndex = lines.length;
-    for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
-      const nextHeading = heading(lines[cursor]);
-      if (nextHeading && nextHeading.level <= currentHeading.level) {
-        endIndex = cursor;
-        break;
-      }
-    }
-    const headingIsCaged = /\bcaged(?:\s+positions)?\b/i.test(currentHeading.text);
-    const sectionHasCagedLabel = lines.slice(index + 1, endIndex)
-      .some((line) => /^\s*[*-]\s*\*{0,2}CAGED\*{0,2}\s*:/i.test(line));
-    if (!headingIsCaged && !sectionHasCagedLabel) continue;
-
+    const endIndex = sectionEndIndex(lines, index, currentHeading.level);
+    if (!hasCagedPositions(lines, index + 1, endIndex, currentHeading.text)) continue;
     const sectionFixtures = extractSection(lines, index + 1, endIndex, root, quality, filename);
-    if (sectionFixtures.length !== 5 || new Set(sectionFixtures.map((item) => item.shape)).size !== 5) {
-      throw new Error(`Se esperaban las cinco formas CAGED en ${filename}: ${currentHeading.text}`);
-    }
+    validateCagedSection(sectionFixtures, filename, currentHeading.text);
     fixtures.push(...sectionFixtures);
-    index = endIndex - 1;
   }
   return fixtures;
 }
