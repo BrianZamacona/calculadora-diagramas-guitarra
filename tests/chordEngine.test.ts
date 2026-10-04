@@ -39,6 +39,30 @@ import { CLASSIC_ALTERNATE_SHAPES_DB, getAlternateShapeData } from "../src/data/
 // ─── Plantillas CAGED ─────────────────────────────────────────
 
 describe("cagedTemplates · ancla y resolución de notas", () => {
+  it("C menor usa su geometría C y difiere de A menor en C, G y A", () => {
+    const roots = ["C", "G", "A"] as const;
+    const comparisons = roots.map((root) => {
+      const rootPitch = NOTES.indexOf(root);
+      const toTab = (shape: "C" | "A"): Array<number | null> => {
+        const frets: Array<number | null> = Array(6).fill(null);
+        resolveCagedShape(rootPitch, CAGED_TEMPLATES[shape], "minor").notes.forEach((note) => {
+          frets[5 - note.string] = note.fret;
+        });
+        return frets;
+      };
+      const cShapeFrets = toTab("C");
+      const aShapeFrets = toTab("A");
+      return { root, cShapeFrets, aShapeFrets, equal: cShapeFrets.join(",") === aShapeFrets.join(",") };
+    });
+    expect(comparisons.map(({ root, cShapeFrets, aShapeFrets }) => ({ root, cShapeFrets, aShapeFrets }))).toEqual([
+      { root: "C", cShapeFrets: [null, 3, 1, 0, 1, 3], aShapeFrets: [null, 3, 5, 5, 4, 3] },
+      { root: "G", cShapeFrets: [null, 10, 8, 7, 8, 10], aShapeFrets: [null, 10, 12, 12, 11, 10] },
+      { root: "A", cShapeFrets: [null, 12, 10, 9, 10, 12], aShapeFrets: [null, 0, 2, 2, 1, 0] },
+    ]);
+    expect(comparisons[0].cShapeFrets).toEqual([null, 3, 1, 0, 1, 3]);
+    expect(comparisons.map((comparison) => comparison.equal)).toEqual([false, false, false]);
+  });
+
   it("forma E en C → ancla traste 8 (6ª cuerda)", () => {
     const rootPitch = NOTES.indexOf("C"); // 0
     const anchor = computeAnchorFret(rootPitch, CAGED_TEMPLATES.E);
@@ -267,12 +291,11 @@ describe("chordEngine · buildCagedVoicings", () => {
     expect([5, 4, 3, 2, 1, 0].map((string) => fretByString.get(string) ?? "x")).toEqual(["x", 0, 2, 2, 1, 0]);
   });
 
-  it("C menor forma C hace cejilla índice desde A3 hasta e3", () => {
+  it("C menor forma C usa su voicing propio sin una cejilla que cruza cuerdas abiertas", () => {
     const voicing = buildCagedVoicings("C", "minor").find((candidate) => candidate.shape === "C" && candidate.anchorFret === 3);
-    expect(voicing?.barre).toEqual({ fret: 3, fromString: 4, toString: 0 });
-    const barreNotes = voicing?.notes.filter((note) => note.fret === 3);
-    expect(barreNotes?.map((note) => note.string).sort((a, b) => a - b)).toEqual([0, 4]);
-    expect(barreNotes?.every((note) => note.finger === 1)).toBe(true);
+    const fretByString = new Map(voicing?.notes.map((note) => [note.string, note.fret]));
+    expect([5, 4, 3, 2, 1, 0].map((string) => fretByString.get(string) ?? null)).toEqual([null, 3, 1, 0, 1, 3]);
+    expect(voicing?.barre).toBeUndefined();
   });
 
   it("C menor forma G usa cejilla de raíz y dedos 3/4 en A/D", () => {
@@ -347,7 +370,7 @@ describe("chordEngine · buildCagedVoicings", () => {
     expect(voicing?.complete).toBe(true);
     expect(voicing?.notes).toHaveLength(5);
     // Pitch-class labels use sharps: A# and D# are Bb and Eb enharmonically.
-    expect(voicing?.notes.map((note) => NOTES[(TUNING[note.string] + note.fret) % 12])).toEqual(["C", "G", "A#", "D#", "G"]);
+    expect(voicing?.notes.map((note) => NOTES[(TUNING[note.string] + note.fret) % 12])).toEqual(["A#", "D#", "G", "C", "G"]);
   });
 
   it("devuelve un voicing parcial conservando raíz, tercera y séptima", () => {
