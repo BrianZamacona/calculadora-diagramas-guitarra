@@ -548,6 +548,28 @@ input:focus-visible {
   padding-top: 10px;
 }
 
+.double-stop-board-wrap {
+  position: relative;
+}
+
+.double-stop-connectors {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.double-stop-connector {
+  stroke: #8de8f5;
+  stroke-opacity: .62;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  filter: drop-shadow(0 1px 2px #0009);
+}
+
 .chord-diagrams {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));

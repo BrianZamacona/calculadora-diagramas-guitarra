@@ -1,5 +1,5 @@
 import { ARPEGGIOS, CHORD_CATEGORIES, CHORD_GLOSSARY, CAGED_QUALITIES, CAGED_SHAPES, FRET_COUNT, NOTES, SCALES, STRINGS, type ArpeggioId, type CagedLayer, type CagedQuality, type CagedShape, type ChordGlossaryEntry, type ModuleId, type ScaleId } from "./data/data";
-import { buildChord, clampRange, findChordVoicings, findCagedBoxes, findCagedLayerMarks, findDiatonicDoubleStopPairs, findDoubleStopPairs, findMarks, findScaleMarks, findVoicingMarks, findVoicingsForIntervals, intervalLabel, noteAt, noteIndex, suggestNoteSets, type ChordBase, type ChordBuilderState, type ChordVoicing, type CagedWindow, type DiatonicDoubleStopInterval, type DoubleStopStringPairGroup, type FretMark, type FretPosition, type NoteSetSuggestion, type Range, type ScaleSystem } from "./utils/domain";
+import { buildChord, clampRange, findChordVoicings, findCagedBoxes, findCagedLayerMarks, findDiatonicDoubleStopPairs, findDoubleStopPairs, findMarks, findScaleMarks, findVoicingMarks, findVoicingsForIntervals, intervalLabel, noteAt, noteIndex, suggestNoteSets, type ChordBase, type ChordBuilderState, type ChordVoicing, type CagedWindow, type DiatonicDoubleStopInterval, type DoubleStopPair, type DoubleStopStringPairGroup, type FretMark, type FretPosition, type NoteSetSuggestion, type Range, type ScaleSystem } from "./utils/domain";
 import { buildCagedVoicings, toRomanFret, type CagedPositionVoicing, type CagedTemplateQuality } from "./utils/chordEngine";
 import { mountCagedModule } from "./cagedModule";
 
@@ -462,6 +462,8 @@ function inlayClass(fret: number, stringIndex: number): string {
 }
 function boardCell(marks: FretMark[], display: DisplayMode, stringIndex: number, fret: number): HTMLElement {
   const cell = el("div", `cell string-${stringIndex + 1}${fret === 0 ? " open" : ""}${inlayClass(fret, stringIndex)}`);
+  cell.dataset.string = String(stringIndex);
+  cell.dataset.fret = String(fret);
   const mark = marks.find((candidate) => candidate.stringIndex === stringIndex && candidate.fret === fret);
   if (mark) {
     const note = el("span", `marker ${mark.kind}`);
@@ -478,14 +480,59 @@ function board(marks: FretMark[], range: Range, display: DisplayMode, cagedBoxes
   const wrapper = el("div", "board-wrap"); const fretColumns = range.end - range.start + 1; const boardElement = el("div", `board frets-${fretColumns}`); wrapper.classList.add(`range-${fretColumns}`);
   for (let fret = range.start; fret <= range.end; fret += 1) { const number = el("div", "fret-number"); number.textContent = String(fret); boardElement.append(number); }
   cagedBoxes.forEach((box) => boardElement.append(cagedBoxElement(box, range)));
-  for (const stringIndex of [5, 4, 3, 2, 1, 0]) {
+  for (const stringIndex of [0, 1, 2, 3, 4, 5]) {
     for (let fret = range.start; fret <= range.end; fret += 1) {
       boardElement.append(boardCell(marks, display, stringIndex, fret));
     }
   }
   wrapper.append(boardElement); return wrapper;
 }
-function diatonicDoubleStopSections(state: State, range: Range): HTMLElement[] {
+
+function boardWithConnectors(
+  wrapper: HTMLElement,
+  pairs: readonly DoubleStopPair[],
+  registerObserver: (observer: ResizeObserver) => void,
+): HTMLElement {
+  wrapper.classList.add("double-stop-board-wrap");
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.classList.add("double-stop-connectors");
+  svg.setAttribute("aria-hidden", "true");
+
+  const updateConnectors = (): void => {
+    if (!wrapper.isConnected) return;
+    const wrapperRect = wrapper.getBoundingClientRect();
+    svg.setAttribute("width", String(wrapperRect.width));
+    svg.setAttribute("height", String(wrapperRect.height));
+    svg.setAttribute("viewBox", `0 0 ${wrapperRect.width} ${wrapperRect.height}`);
+    svg.replaceChildren();
+    pairs.forEach(({ root, interval }) => {
+      const rootCell = wrapper.querySelector<HTMLElement>(`[data-string="${root.stringIndex}"][data-fret="${root.fret}"]`);
+      const intervalCell = wrapper.querySelector<HTMLElement>(`[data-string="${interval.stringIndex}"][data-fret="${interval.fret}"]`);
+      if (!rootCell || !intervalCell) return;
+      const rootRect = rootCell.getBoundingClientRect();
+      const intervalRect = intervalCell.getBoundingClientRect();
+      const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      line.classList.add("double-stop-connector");
+      line.setAttribute("x1", String(rootRect.left - wrapperRect.left + rootRect.width / 2));
+      line.setAttribute("y1", String(rootRect.top - wrapperRect.top + rootRect.height / 2));
+      line.setAttribute("x2", String(intervalRect.left - wrapperRect.left + intervalRect.width / 2));
+      line.setAttribute("y2", String(intervalRect.top - wrapperRect.top + intervalRect.height / 2));
+      svg.append(line);
+    });
+  };
+
+  wrapper.append(svg);
+  const resizeObserver = new ResizeObserver(() => updateConnectors());
+  resizeObserver.observe(wrapper);
+  const boardElement = wrapper.querySelector(".board");
+  if (boardElement) resizeObserver.observe(boardElement);
+  registerObserver(resizeObserver);
+  wrapper.addEventListener("scroll", updateConnectors, { passive: true });
+  requestAnimationFrame(updateConnectors);
+  return wrapper;
+}
+
+function diatonicDoubleStopSections(state: State, range: Range, registerObserver: (observer: ResizeObserver) => void): HTMLElement[] {
   const groups = findDiatonicDoubleStopPairs(state.root, state.diatonicDoubleStop, range)
     .filter((group) => group.pairs.length > 0);
   if (groups.length === 0) {
@@ -500,7 +547,8 @@ function diatonicDoubleStopSections(state: State, range: Range): HTMLElement[] {
       uniqueMarks.set(`${root.stringIndex}:${root.fret}`, root);
       uniqueMarks.set(`${interval.stringIndex}:${interval.fret}`, interval);
     });
-    section.append(heading, board([...uniqueMarks.values()], range, state.display));
+    const diagram = board([...uniqueMarks.values()], range, state.display);
+    section.append(heading, boardWithConnectors(diagram, group.pairs, registerObserver));
     return section;
   });
 }
@@ -530,7 +578,10 @@ export function mountApp(root: HTMLElement): void {
   const state: State = { module: "inicio", root: "C", scale: "mayor", scaleSystem: "all", arpeggio: "Maj", arpeggioMode: "full", stringSet: 0, cagedShape: "ALL", cagedQuality: "Maj", cagedLayer: "chord", display: "notes", start: 0, end: FRET_COUNT, doubleStop: 3, doubleStopMode: "fixed", diatonicDoubleStop: "3rd", chordCategory: "Todos", searchQuery: "", searchNotes: [], chordBuilder: { root: "C", base: "major", bass: undefined, fifth: "5", seventh: "none", extensions: [], additions: [] } };
   const app = el("main"); const hero = el("header", "hero"); const eyebrow = el("div", "eyebrow"); eyebrow.textContent = "Teoría aplicada al mástil"; const title = el("h1"); title.textContent = "Diapasón"; const description = el("p"); description.textContent = "Aprende guitarra desde cero o profundiza tu teoría musical: acordes, escalas y arpegios sobre un mástil de 24 trastes."; hero.append(el("div")); hero.firstElementChild?.append(eyebrow, title, description); app.append(hero);
   const tabs = el("nav", "tabs"); tabs.setAttribute("role", "tablist"); tabs.setAttribute("aria-label", "Módulos de estudio"); const content = el("section", "panel"); content.id = "content-panel"; content.setAttribute("role", "tabpanel"); content.tabIndex = -1; app.append(tabs, content); root.replaceChildren(app);
+  const doubleStopObservers = new Set<ResizeObserver>();
   const draw = (): void => {
+    doubleStopObservers.forEach((observer) => observer.disconnect());
+    doubleStopObservers.clear();
     content.replaceChildren();
     if (state.module === "inicio") { content.append(homeView()); return; }
     if (state.module === "acordes") { content.append(chordBuilderView(state, draw)); return; }
@@ -550,7 +601,7 @@ export function mountApp(root: HTMLElement): void {
     }
     content.append(legend(state.module === "ds"));
     if (state.module === "ds" && state.doubleStopMode === "diatonic") {
-      content.append(...diatonicDoubleStopSections(state, clampRange(state.start, state.end)));
+      content.append(...diatonicDoubleStopSections(state, clampRange(state.start, state.end), (observer) => doubleStopObservers.add(observer)));
     } else content.append(renderBoard(state));
     const status = el("p", "status");
     let moduleLabel = "mapa de notas";
