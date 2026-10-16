@@ -38,6 +38,12 @@ describe("domain musical", () => {
     expect(groups[0].pairs.some((pair) => pair.degree === 2 && pair.intervalQuality === "3ª menor")).toBe(true);
   });
 
+  it("genera double stops diatónicos en el rango de trastes 13 a 24", () => {
+    const pairs = findDiatonicDoubleStopPairs("C", "3rd", { start: 13, end: 24 }).flatMap((group) => group.pairs);
+    expect(pairs.length).toBeGreaterThan(0);
+    expect(pairs.every(({ root, interval }) => root.fret >= 13 && interval.fret >= 13)).toBe(true);
+  });
+
   it("encuentra sexta mayor de 9 semitonos en el II de C mayor", () => {
     const groups = findDiatonicDoubleStopPairs("C", "6th", { start: 0, end: 12 });
     expect(groups.map((group) => group.stringPair)).toEqual([[0, 2], [1, 3], [2, 4], [3, 5]]);

@@ -494,40 +494,49 @@ function boardWithConnectors(
   registerObserver: (observer: ResizeObserver) => void,
 ): HTMLElement {
   wrapper.classList.add("double-stop-board-wrap");
+  const boardElement = wrapper.querySelector<HTMLElement>(".board");
+  if (!boardElement) return wrapper;
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   svg.classList.add("double-stop-connectors");
   svg.setAttribute("aria-hidden", "true");
 
   const updateConnectors = (): void => {
     if (!wrapper.isConnected) return;
-    const wrapperRect = wrapper.getBoundingClientRect();
-    svg.setAttribute("width", String(wrapperRect.width));
-    svg.setAttribute("height", String(wrapperRect.height));
-    svg.setAttribute("viewBox", `0 0 ${wrapperRect.width} ${wrapperRect.height}`);
+    wrapper.classList.toggle("double-stop-board-overflow", wrapper.scrollWidth > wrapper.clientWidth);
+    const boardRect = boardElement.getBoundingClientRect();
+    const width = boardElement.clientWidth;
+    const height = boardElement.clientHeight;
+    svg.setAttribute("width", String(width));
+    svg.setAttribute("height", String(height));
+    svg.style.width = `${width}px`;
+    svg.style.height = `${height}px`;
+    svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
     svg.replaceChildren();
     pairs.forEach(({ root, interval }) => {
-      const rootCell = wrapper.querySelector<HTMLElement>(`[data-string="${root.stringIndex}"][data-fret="${root.fret}"]`);
-      const intervalCell = wrapper.querySelector<HTMLElement>(`[data-string="${interval.stringIndex}"][data-fret="${interval.fret}"]`);
-      if (!rootCell || !intervalCell) return;
-      const rootRect = rootCell.getBoundingClientRect();
-      const intervalRect = intervalCell.getBoundingClientRect();
+      const rootCell = boardElement.querySelector<HTMLElement>(`[data-string="${root.stringIndex}"][data-fret="${root.fret}"]`);
+      const intervalCell = boardElement.querySelector<HTMLElement>(`[data-string="${interval.stringIndex}"][data-fret="${interval.fret}"]`);
+      const rootRect = rootCell?.getBoundingClientRect() ?? null;
+      const intervalRect = intervalCell?.getBoundingClientRect() ?? null;
+      const x1 = rootRect ? rootRect.left - boardRect.left - boardElement.clientLeft + rootRect.width / 2 : null;
+      const y1 = rootRect ? rootRect.top - boardRect.top - boardElement.clientTop + rootRect.height / 2 : null;
+      const x2 = intervalRect ? intervalRect.left - boardRect.left - boardElement.clientLeft + intervalRect.width / 2 : null;
+      const y2 = intervalRect ? intervalRect.top - boardRect.top - boardElement.clientTop + intervalRect.height / 2 : null;
+      if (!rootCell || !intervalCell || x1 === null || y1 === null || x2 === null || y2 === null) return;
       const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
       line.classList.add("double-stop-connector");
-      line.setAttribute("x1", String(rootRect.left - wrapperRect.left + rootRect.width / 2));
-      line.setAttribute("y1", String(rootRect.top - wrapperRect.top + rootRect.height / 2));
-      line.setAttribute("x2", String(intervalRect.left - wrapperRect.left + intervalRect.width / 2));
-      line.setAttribute("y2", String(intervalRect.top - wrapperRect.top + intervalRect.height / 2));
+      line.setAttribute("x1", String(x1));
+      line.setAttribute("y1", String(y1));
+      line.setAttribute("x2", String(x2));
+      line.setAttribute("y2", String(y2));
       svg.append(line);
     });
   };
 
-  wrapper.append(svg);
+  boardElement.append(svg);
   const resizeObserver = new ResizeObserver(() => updateConnectors());
   resizeObserver.observe(wrapper);
-  const boardElement = wrapper.querySelector(".board");
-  if (boardElement) resizeObserver.observe(boardElement);
+  resizeObserver.observe(boardElement);
   registerObserver(resizeObserver);
-  wrapper.addEventListener("scroll", updateConnectors, { passive: true });
   requestAnimationFrame(updateConnectors);
   return wrapper;
 }
