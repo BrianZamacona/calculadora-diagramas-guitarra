@@ -67,7 +67,9 @@ const DIATONIC_DOUBLE_STOP_INTERVALS: Record<DiatonicDoubleStopInterval, readonl
     { distance: 11, quality: "7ª mayor" }, { distance: 10, quality: "7ª menor" },
     { distance: 10, quality: "7ª menor" }, { distance: 11, quality: "7ª mayor" },
     { distance: 10, quality: "7ª menor" }, { distance: 10, quality: "7ª menor" },
-    { distance: 9, quality: "7ª disminuida" },
+    // VII–VI de la escala mayor (B–A en C): 7ª menor, acorde m7♭5. La 7ª
+    // disminuida (9) es del VII de la menor armónica, no de la mayor.
+    { distance: 10, quality: "7ª menor" },
   ],
 };
 
